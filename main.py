@@ -42,7 +42,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、分术数群开关与 Agent Tool"
-PLUGIN_VERSION = "0.4.0"
+PLUGIN_VERSION = "0.4.1"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -312,6 +312,11 @@ class LiuyaoPlugin(Star):
                 f"当前 AstrBot 模型接口不可用，已本地补为{label}",
             )
 
+        timeout = float(
+            self._config_get("agent_comment_timeout_seconds", 45) or 45
+        )
+        timeout = min(max(timeout, 5), 90)
+
         try:
             umo = str(getattr(event, "unified_msg_origin", "") or "")
             provider_id = await get_provider_id(umo=umo)
@@ -322,10 +327,7 @@ class LiuyaoPlugin(Star):
                 question=question,
                 agent_name=display_name,
             )
-            timeout = float(
-                self._config_get("agent_comment_timeout_seconds", 30) or 30
-            )
-            timeout = min(max(timeout, 5), 90)
+
             response = await asyncio.wait_for(
                 llm_generate(
                     chat_provider_id=provider_id,
@@ -350,15 +352,29 @@ class LiuyaoPlugin(Star):
                 comment,
                 f"当前会话模型已{action}（{label}）",
             )
-        except Exception as exc:
-            logger.warning(f"liuyao：AI 图卡补全失败，使用本地回退：{exc}")
-            label = self.readings.directions[base_intent]["label"]
-            return (
-                base_intent,
-                display_name,
-                fallback_comment,
-                f"AI补全失败，已使用本地保守提示（{label}）",
+        except asyncio.TimeoutError:
+            logger.warning(
+                "liuyao：AI 图卡补全超时（%.0f 秒），使用本地回退；"
+                "可调高 agent_comment_timeout_seconds。",
+                timeout,
             )
+            fallback_status = f"AI补全超时（{timeout:g} 秒），已使用本地保守提示"
+        except Exception as exc:
+            error_type = type(exc).__name__
+            logger.warning(
+                "liuyao：AI 图卡补全失败，使用本地回退（%s）：%r",
+                error_type,
+                exc,
+            )
+            fallback_status = f"AI补全失败（{error_type}），已使用本地保守提示"
+
+        label = self.readings.directions[base_intent]["label"]
+        return (
+            base_intent,
+            display_name,
+            fallback_comment,
+            f"{fallback_status}（{label}）",
+        )
 
     def _chart_enrichment_prompt(
         self,

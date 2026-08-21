@@ -115,7 +115,7 @@
 - `agent_send_chart_image`：Agent 起卦时是否先发送排盘图，默认为 `true`。
 - `agent_generate_chart_comment`：是否使用当前会话模型生成图中短评并补全缺失方向，默认为 `true`。
 - `agent_display_name`：Agent 没传入自身名字时使用的默认短评署名。
-- `agent_comment_timeout_seconds`：短评生成超时，范围 5–90 秒，默认 30 秒。
+- `agent_comment_timeout_seconds`：短评生成超时，范围 5–90 秒，默认 45 秒。
 - `chart_font_path`：可选中文 `.ttf`/`.ttc` 字体绝对路径；留空会自动检测微软雅黑、黑体、Noto Sans CJK 或苹方。
 - `show_disclaimer`：普通指令是否显示传统文化参考提示。
 

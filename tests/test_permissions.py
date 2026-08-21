@@ -59,6 +59,7 @@ sys.modules.setdefault("astrbot.core.star.filter", core_filter)
 sys.modules.setdefault("astrbot.core.star.filter.command", command_api)
 
 from corpus import ZhouyiCorpus  # noqa: E402
+from divination import CastResult  # noqa: E402
 from main import LiuyaoPlugin, METHOD_LIUYAO  # noqa: E402
 from reading import ReadingService  # noqa: E402
 
@@ -293,6 +294,36 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     assert "AI短评：可可子：先核实机会与成本，再择稳妥时点推进。" in result
     assert "本卦六亲（初爻→上爻）" in result
     assert "开头先明确列出本卦、之卦、动爻和六亲" in result
+
+def test_agent_chart_timeout_has_explicit_fallback_status() -> None:
+    class TimeoutContext:
+        async def get_current_chat_provider_id(self, *, umo):
+            assert umo == "aiocqhttp:GroupMessage:10001"
+            return "provider-1"
+
+        async def llm_generate(self, *, chat_provider_id, prompt):
+            del chat_provider_id, prompt
+            raise asyncio.TimeoutError
+
+    plugin = _make_enabled_plugin()
+    plugin.config["agent_comment_timeout_seconds"] = 5
+    plugin.context = TimeoutContext()
+    cast = CastResult((7, 8, 9, 6, 7, 8))
+
+    intent, agent_name, comment, status = asyncio.run(
+        plugin._enrich_agent_chart(
+            _Event("member"),
+            cast,
+            intent="career",
+            question="今年适合换工作吗",
+            agent_name="可可子",
+        )
+    )
+
+    assert intent == "career"
+    assert agent_name == "可可子"
+    assert comment
+    assert status == "AI补全超时（5 秒），已使用本地保守提示（事业）"
 
 def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
     plugin = _make_enabled_plugin()

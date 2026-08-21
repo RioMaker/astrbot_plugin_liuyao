@@ -39,7 +39,7 @@
     "type": "int",
     "description": "生成图中 AI 短评的超时秒数",
     "hint": "允许范围 5-90；超时或模型失败时自动使用本地保守提示，不影响发图和文字解卦。",
-    "default": 30
+    "default": 45
   },
   "chart_font_path": {
     "type": "string",
