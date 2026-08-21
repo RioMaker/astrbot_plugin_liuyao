@@ -295,6 +295,36 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     assert "本卦六亲（初爻→上爻）" in result
     assert "开头先明确列出本卦、之卦、动爻和六亲" in result
 
+def test_plain_command_sends_local_chart_and_keeps_text(tmp_path) -> None:
+    class FakeRenderer:
+        def __init__(self):
+            self.kwargs = None
+
+        def render(self, cast, **kwargs):
+            assert cast.primary_number in range(1, 65)
+            self.kwargs = kwargs
+            output = tmp_path / "command-chart.png"
+            output.write_bytes(b"fake-png")
+            return output
+
+    plugin = _make_enabled_plugin()
+    renderer = FakeRenderer()
+    plugin.renderer = renderer
+    event = _Event("member")
+
+    result = asyncio.run(
+        plugin._content_reply(event, "事业 今年是否适合换工作")
+    )
+
+    assert len(event.sent) == 1
+    assert event.sent[0]["image"].endswith("command-chart.png")
+    assert not (tmp_path / "command-chart.png").exists()
+    assert renderer.kwargs["comment_title"] == "排盘提示"
+    assert renderer.kwargs["agent_name"] == "本地排盘"
+    assert renderer.kwargs["intent_label"] == "事业"
+    assert "所问：今年是否适合换工作" in result
+    assert "本卦：" in result
+
 def test_agent_chart_timeout_has_explicit_fallback_status() -> None:
     class TimeoutContext:
         async def get_current_chat_provider_id(self, *, umo):

@@ -101,7 +101,7 @@
 
 短评调用超时、模型输出异常或图片发送失败时都会自动回退，不阻断完整文字卦象和 Agent 回答。启用 AI 短评会额外产生一次较短的当前模型调用。
 
-工具只在已启用六爻的 QQ 群内工作。普通指令不会自动调用模型；通过 Agent 使用时，由当前 Agent 对工具结果进行解释。
+工具只在已启用六爻的 QQ 群内工作。普通指令会发送带本地排盘提示的图片，但不会自动调用模型；通过 Agent 使用时，由当前 Agent 对工具结果进行解释。
 
 ## 安装与配置
 
@@ -113,6 +113,7 @@
 - `allow_operator_api_lookup`：原始事件缺少 `sender.role` 时，读取 OneBot 群成员资料核验群主/群管理员。
 - `max_question_length`：问题最大长度。
 - `agent_send_chart_image`：Agent 起卦时是否先发送排盘图，默认为 `true`。
+- `command_send_chart_image`：普通六爻指令是否先发送排盘图，默认为 `true`。
 - `agent_generate_chart_comment`：是否使用当前会话模型生成图中短评并补全缺失方向，默认为 `true`。
 - `agent_display_name`：Agent 没传入自身名字时使用的默认短评署名。
 - `agent_comment_timeout_seconds`：短评生成超时，范围 5–90 秒，默认 45 秒。

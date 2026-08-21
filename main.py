@@ -42,7 +42,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、分术数群开关与 Agent Tool"
-PLUGIN_VERSION = "0.4.1"
+PLUGIN_VERSION = "0.4.2"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -79,7 +79,7 @@ HELP_TEXT = """六爻起卦插件
   当前只有“六爻”一种术数；QQ 群主或 QQ 群管理员可以设置。
 
 方向：综合、事业、感情、财富、学业、健康、家庭、出行。
-也可直接对 Agent 说“为我起一卦”；Agent 会补全缺失方向，并先发送含六亲及署名短评的详细排盘图。
+普通起卦指令会先发送详细排盘图；也可直接对 Agent 说“为我起一卦”，由 Agent 补全方向和署名短评。
 说明：结果用于传统文化体验与自我反思，不替代现实决策或专业意见。"""
 
 
@@ -503,6 +503,7 @@ class LiuyaoPlugin(Star):
             str(value or "").replace("\x00", "").split()
         ).strip()
         return cleaned[:limit]
+
     async def _send_agent_chart(
         self,
         event: AstrMessageEvent,
@@ -517,11 +518,49 @@ class LiuyaoPlugin(Star):
         ai_comment: str,
     ) -> str:
         """Render and send the chart before returning context to the Agent."""
-        if not bool(self._config_get("agent_send_chart_image", True)):
-            return "已按插件配置关闭图片发送"
+        return await self._render_and_send_chart(
+            event,
+            cast,
+            intent=intent,
+            intent_label_suffix=intent_label_suffix,
+            question=question,
+            method=method,
+            cast_at=cast_at,
+            agent_name=agent_name,
+            ai_comment=ai_comment,
+            comment_title="AI短评",
+            enabled_key="agent_send_chart_image",
+            source="Agent",
+        )
+
+    async def _render_and_send_chart(
+        self,
+        event: AstrMessageEvent,
+        cast: CastResult,
+        *,
+        intent: str,
+        intent_label_suffix: str,
+        question: str,
+        method: str,
+        cast_at: datetime,
+        agent_name: str,
+        ai_comment: str,
+        comment_title: str,
+        enabled_key: str,
+        source: str,
+    ) -> str:
+        """Render one chart and actively send it for commands or Agent tools."""
+        if not bool(self._config_get(enabled_key, True)):
+            logger.warning(
+                "liuyao：%s 排盘图发送已由配置关闭（%s=false）",
+                source,
+                enabled_key,
+            )
+            return f"已按插件配置 {enabled_key} 关闭图片发送"
 
         renderer = getattr(self, "renderer", None)
         if renderer is None:
+            logger.warning("liuyao：%s 排盘图渲染器不可用", source)
             return "渲染器不可用，已回退为文字卦象"
 
         caster_name, caster_id = self._caster_identity(event)
@@ -545,12 +584,28 @@ class LiuyaoPlugin(Star):
                 cast_at=cast_at,
                 agent_name=agent_name,
                 ai_comment=ai_comment,
+                comment_title=comment_title,
             )
+            if not image_path.is_file() or image_path.stat().st_size <= 0:
+                raise ChartRenderError("渲染器没有生成有效 PNG 文件")
             await event.send(event.image_result(str(image_path.absolute())))
-            return "已在工具返回前发送到当前会话"
+            logger.info(
+                "liuyao：%s 排盘图发送成功（%d bytes）",
+                source,
+                image_path.stat().st_size,
+            )
+            if source == "Agent":
+                return "已在工具返回前发送到当前会话"
+            return "已发送到当前会话"
         except Exception as exc:
-            logger.exception(f"liuyao：Agent 卦象信息图生成或发送失败：{exc}")
-            return "生成或发送失败，已回退为文字卦象"
+            error_type = type(exc).__name__
+            logger.exception(
+                "liuyao：%s 排盘图生成或发送失败（%s）：%r",
+                source,
+                error_type,
+                exc,
+            )
+            return f"生成或发送失败（{error_type}），已回退为文字卦象"
         finally:
             if image_path is not None:
                 try:
@@ -629,12 +684,12 @@ class LiuyaoPlugin(Star):
         if error:
             return error
         intent, question = parse_intent_and_question(content)
-        return self.readings.render(
+        return await self._command_chart_reply(
+            event,
             cast_instant(),
             intent=intent,
             question=self._limited_question(question),
             method="即时天机（简捷问卦）",
-            show_disclaimer=self._show_disclaimer(),
         )
 
     async def _instant_reply(
@@ -646,12 +701,12 @@ class LiuyaoPlugin(Star):
         if error:
             return error
         intent, question = parse_intent_and_question(tail)
-        return self.readings.render(
+        return await self._command_chart_reply(
+            event,
             cast_instant(),
             intent=intent,
             question=self._limited_question(question),
             method="即时天机（三枚铜币等概率模拟）",
-            show_disclaimer=self._show_disclaimer(),
         )
 
     async def _manual_reply(
@@ -680,13 +735,50 @@ class LiuyaoPlugin(Star):
             method = f"手动指定卦名（{row['name']}静卦）"
 
         intent, question = parse_intent_and_question(remainder)
-        return self.readings.render(
+        return await self._command_chart_reply(
+            event,
             cast,
             intent=intent,
             question=self._limited_question(question),
             method=method,
+        )
+
+    async def _command_chart_reply(
+        self,
+        event: AstrMessageEvent,
+        cast: CastResult,
+        *,
+        intent: str,
+        question: str,
+        method: str,
+    ) -> str:
+        """Send the command chart, then return the existing textual reading."""
+        cast_at = datetime.now().astimezone()
+        chart_status = await self._render_and_send_chart(
+            event,
+            cast,
+            intent=intent,
+            intent_label_suffix="",
+            question=question,
+            method=method,
+            cast_at=cast_at,
+            agent_name="本地排盘",
+            ai_comment=self._fallback_chart_comment(cast),
+            comment_title="排盘提示",
+            enabled_key="command_send_chart_image",
+            source="指令",
+        )
+        reading = self.readings.render(
+            cast,
+            intent=intent,
+            question=question,
+            method=method,
             show_disclaimer=self._show_disclaimer(),
         )
+        if chart_status.startswith("已发送"):
+            return reading
+        return f"排盘图：{chart_status}\n\n{reading}"
+
     async def _switch_reply(
         self,
         event: AstrMessageEvent,

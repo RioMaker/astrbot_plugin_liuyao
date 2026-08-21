@@ -23,6 +23,12 @@
     "hint": "默认开启。图片包含卦象、动爻、起卦人、群号、时间、问题及古籍卦爻辞。",
     "default": true
   },
+  "command_send_chart_image": {
+    "type": "bool",
+    "description": "普通六爻指令发送排盘图",
+    "hint": "默认开启。/六爻、/六爻 即时和/六爻 手动都会先发送排盘图，再返回文字解卦。",
+    "default": true
+  },
   "agent_generate_chart_comment": {
     "type": "bool",
     "description": "Agent 起卦后调用当前会话模型生成图中短评",

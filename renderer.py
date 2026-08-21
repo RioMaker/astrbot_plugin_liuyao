@@ -69,6 +69,7 @@ class LiuyaoImageRenderer:
         cast_at: datetime,
         agent_name: str = "AI助手",
         ai_comment: str = "",
+        comment_title: str = "AI短评",
         output_path: str | Path | None = None,
     ) -> Path:
         primary = self.corpus.get(cast.primary_number)
@@ -153,6 +154,7 @@ class LiuyaoImageRenderer:
             y,
             comment_height,
             comment_lines,
+            comment_title,
             fonts,
         )
         y = self._draw_diagram(
@@ -302,6 +304,7 @@ class LiuyaoImageRenderer:
         y: int,
         height: int,
         comment_lines: list[str],
+        comment_title: str,
         fonts: dict[str, ImageFont.FreeTypeFont],
     ) -> int:
         top = y + 4
@@ -315,7 +318,7 @@ class LiuyaoImageRenderer:
         )
         draw.text(
             (MARGIN + 24, top + 22),
-            "AI短评",
+            self._clean(comment_title) or "排盘提示",
             font=fonts["section"],
             fill=JADE,
         )
