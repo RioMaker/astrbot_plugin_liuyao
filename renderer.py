@@ -30,6 +30,12 @@ JADE = "#294B3F"
 GOLD = "#B88A3B"
 PANEL = "#FBF5E7"
 LINE_LABELS = {1: "初爻", 2: "二爻", 3: "三爻", 4: "四爻", 5: "五爻", 6: "上爻"}
+BUNDLED_FONT_PATH = (
+    Path(__file__).resolve().parent
+    / "assets"
+    / "fonts"
+    / "NotoSansCJKsc-Regular.otf"
+)
 
 
 class ChartRenderError(RuntimeError):
@@ -47,9 +53,7 @@ class LiuyaoImageRenderer:
     ):
         self.corpus = corpus
         custom_font = Path(font_path).expanduser() if font_path else None
-        if custom_font is not None:
-            if not custom_font.is_file():
-                raise ChartRenderError(f"配置的中文字体不存在：{custom_font}")
+        if custom_font is not None and custom_font.is_file():
             self._font_regular = custom_font
             self._font_bold = custom_font
         else:
@@ -535,6 +539,7 @@ class LiuyaoImageRenderer:
     @staticmethod
     def _find_font(*, bold: bool) -> Path:
         regular = [
+            BUNDLED_FONT_PATH,
             Path("C:/Windows/Fonts/msyh.ttc"),
             Path("C:/Windows/Fonts/simhei.ttf"),
             Path("C:/Windows/Fonts/simsun.ttc"),
@@ -543,6 +548,7 @@ class LiuyaoImageRenderer:
             Path("/System/Library/Fonts/PingFang.ttc"),
         ]
         bold_candidates = [
+            BUNDLED_FONT_PATH,
             Path("C:/Windows/Fonts/msyhbd.ttc"),
             Path("C:/Windows/Fonts/simhei.ttf"),
             Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),

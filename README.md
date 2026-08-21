@@ -105,7 +105,7 @@
 
 ## 安装与配置
 
-把本目录放入 AstrBot 的 `data/plugins/`，在 WebUI 重载插件。最低 AstrBot 版本为 4.9.2；运行时依赖 Pillow，AstrBot 会根据 `requirements.txt` 安装。
+把本目录放入 AstrBot 的 `data/plugins/`，在 WebUI 重载插件。最低 AstrBot 版本为 4.9.2；运行时依赖 Pillow，AstrBot 会根据 `requirements.txt` 安装。插件已内置 Noto Sans CJK SC 字体，因此 Linux/Docker 宿主机无需另外安装中文字体；字体按 SIL Open Font License 1.1 分发，许可证见 `assets/fonts/LICENSE.txt`。
 
 配置项：
 
@@ -117,7 +117,7 @@
 - `agent_generate_chart_comment`：是否使用当前会话模型生成图中短评并补全缺失方向，默认为 `true`。
 - `agent_display_name`：Agent 没传入自身名字时使用的默认短评署名。
 - `agent_comment_timeout_seconds`：短评生成超时，范围 5–90 秒，默认 45 秒。
-- `chart_font_path`：可选中文 `.ttf`/`.ttc` 字体绝对路径；留空会自动检测微软雅黑、黑体、Noto Sans CJK 或苹方。
+- `chart_font_path`：可选中文 `.ttf`/`.ttc`/`.otf` 字体绝对路径；留空或路径无效时使用插件内置 Noto Sans CJK SC。
 - `show_disclaimer`：普通指令是否显示传统文化参考提示。
 
 ## 数据与扩充

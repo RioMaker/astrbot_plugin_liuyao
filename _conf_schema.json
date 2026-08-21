@@ -50,7 +50,7 @@
   "chart_font_path": {
     "type": "string",
     "description": "六爻信息图自定义中文字体路径",
-    "hint": "通常留空自动检测微软雅黑、黑体、Noto Sans CJK 或苹方；服务器缺少中文字体时可填写 .ttf/.ttc 绝对路径。",
+    "hint": "通常留空使用插件内置 Noto Sans CJK；也可填写自定义 .ttf/.ttc/.otf 绝对路径。路径无效时自动回退到内置字体。",
     "default": ""
   },
   "show_disclaimer": {

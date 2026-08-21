@@ -17,10 +17,16 @@ def test_configuration_and_metadata_contract() -> None:
     assert config["agent_comment_timeout_seconds"]["default"] == 45
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
-    assert "version: \"0.4.2\"" in metadata
+    assert "version: \"0.4.3\"" in metadata
     assert "aiocqhttp" in metadata
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert "Pillow>=10.0.0" in requirements
+    font = ROOT / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"
+    font_license = ROOT / "assets" / "fonts" / "LICENSE.txt"
+    assert font.stat().st_size > 10_000_000
+    assert "SIL OPEN FONT LICENSE Version 1.1" in font_license.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_corpus_has_revision_attribution_and_special_lines() -> None:

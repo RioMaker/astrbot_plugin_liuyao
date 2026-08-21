@@ -49,6 +49,18 @@ def test_renderer_creates_detailed_png(tmp_path) -> None:
         assert image.height > 1200
 
 
+def test_renderer_uses_bundled_font_when_custom_path_is_missing(tmp_path) -> None:
+    corpus = ZhouyiCorpus(ROOT / "data" / "zhouyi.json")
+    renderer = LiuyaoImageRenderer(
+        corpus,
+        font_path=tmp_path / "missing-font.ttf",
+    )
+
+    expected = ROOT / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"
+    assert renderer._font_regular == expected
+    assert renderer._font_bold == expected
+
+
 def test_renderer_detail_rows_include_each_moving_line() -> None:
     corpus = ZhouyiCorpus(ROOT / "data" / "zhouyi.json")
     renderer = LiuyaoImageRenderer(corpus)
