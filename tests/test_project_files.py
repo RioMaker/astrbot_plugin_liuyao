@@ -18,7 +18,7 @@ def test_configuration_and_metadata_contract() -> None:
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert "version: \"0.5.0\"" in metadata
+    assert "version: \"0.5.1\"" in metadata
     assert "aiocqhttp" in metadata
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert "Pillow>=10.0.0" in requirements

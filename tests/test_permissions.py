@@ -70,10 +70,11 @@ class _Message:
 
 
 class _Event:
-    def __init__(self, role):
+    def __init__(self, role, *, astrbot_admin=False):
         self.message_obj = _Message(role)
         self.sent = []
         self.unified_msg_origin = "aiocqhttp:GroupMessage:10001"
+        self._astrbot_admin = astrbot_admin
 
     def get_group_id(self):
         return "10001"
@@ -83,6 +84,9 @@ class _Event:
 
     def get_sender_name(self):
         return "测试群友"
+
+    def is_admin(self):
+        return self._astrbot_admin
 
     def image_result(self, path):
         return {"image": path}
@@ -109,12 +113,43 @@ def _make_enabled_plugin() -> LiuyaoPlugin:
     return plugin
 
 
-def test_owner_and_group_admin_are_accepted() -> None:
+def test_owner_group_admin_and_astrbot_admin_are_accepted() -> None:
     plugin = object.__new__(LiuyaoPlugin)
     plugin.config = {"allow_operator_api_lookup": False}
-    assert asyncio.run(plugin._is_group_operator(_Event("owner"))) is True
-    assert asyncio.run(plugin._is_group_operator(_Event("admin"))) is True
-    assert asyncio.run(plugin._is_group_operator(_Event("member"))) is False
+    assert asyncio.run(plugin._can_manage_switch(_Event("owner"))) is True
+    assert asyncio.run(plugin._can_manage_switch(_Event("admin"))) is True
+    assert (
+        asyncio.run(
+            plugin._can_manage_switch(_Event("member", astrbot_admin=True))
+        )
+        is True
+    )
+    assert asyncio.run(plugin._can_manage_switch(_Event("member"))) is False
+
+
+def test_astrbot_admin_can_enable_group_switch() -> None:
+    store = {}
+    plugin = object.__new__(LiuyaoPlugin)
+    plugin.config = {"allow_operator_api_lookup": False}
+    plugin._switch_lock = asyncio.Lock()
+
+    async def get_data(key, default=None):
+        return store.get(key, default)
+
+    async def put_data(key, value):
+        store[key] = value
+
+    plugin.get_kv_data = get_data
+    plugin.put_kv_data = put_data
+    result = asyncio.run(
+        plugin._switch_reply(
+            _Event("member", astrbot_admin=True),
+            METHOD_LIUYAO,
+            True,
+        )
+    )
+    assert result == "本群“六爻”功能已开启。"
+    assert store["method_switches"] == {"10001": {"liuyao": True}}
 
 
 def test_missing_role_can_use_read_only_onebot_lookup() -> None:
@@ -171,7 +206,7 @@ def test_source_registers_flat_commands_and_agent_tools() -> None:
     assert "command_group" not in source
     assert '@filter.llm_tool(name="cast_liuyao")' in source
     assert '@filter.llm_tool(name="lookup_zhouyi_text")' in source
-    assert "群主或 QQ 群管理员" in source
+    assert "QQ 群主、QQ 群管理员或 AstrBot 管理员" in source
     compile(source, str(ROOT / "main.py"), "exec")
 
 

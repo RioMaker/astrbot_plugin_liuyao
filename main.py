@@ -42,7 +42,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、分术数群开关与 Agent Tool"
-PLUGIN_VERSION = "0.5.0"
+PLUGIN_VERSION = "0.5.1"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -76,7 +76,7 @@ HELP_TEXT = """六爻起卦插件
 /六爻 关
 /六爻 状态
 /起卦 六爻 开|关|状态
-  当前只有“六爻”一种术数；QQ 群主或 QQ 群管理员可以设置。
+  当前只有“六爻”一种术数；QQ 群主、QQ 群管理员或 AstrBot 管理员可以设置。
 
 方向：综合、事业、感情、财富、学业、健康、家庭、出行。
 普通起卦指令会先发送详细排盘图；也可直接对 Agent 说“为我起一卦”，由 Agent 补全方向和署名短评。
@@ -798,8 +798,8 @@ class LiuyaoPlugin(Star):
         group_id = str(event.get_group_id() or "").strip()
         if not group_id:
             return "开关指令只能在 QQ 群聊中使用。"
-        if not await self._is_group_operator(event):
-            return "无权限：只有当前 QQ 群主或 QQ 群管理员可以设置术数开关。"
+        if not await self._can_manage_switch(event):
+            return "无权限：只有当前 QQ 群主、QQ 群管理员或 AstrBot 管理员可以设置术数开关。"
 
         label = METHOD_LABELS.get(method, method)
         if desired is None:
@@ -835,7 +835,7 @@ class LiuyaoPlugin(Star):
         return "invalid"
 
     # ------------------------------------------------------------------
-    # Per-group, per-divination-method state and QQ role checks
+    # Per-group, per-divination-method state and administrator checks
     # ------------------------------------------------------------------
     async def _group_gate(self, event: AstrMessageEvent, method: str) -> str:
         group_id = str(event.get_group_id() or "").strip()
@@ -845,7 +845,7 @@ class LiuyaoPlugin(Star):
             label = METHOD_LABELS.get(method, method)
             return (
                 f"本群“{label}”功能尚未开启，"
-                f"请群主或管理员发送 /{label} 开。"
+                f"请群主、群管理员或 AstrBot 管理员发送 /{label} 开。"
             )
         return ""
 
@@ -879,6 +879,16 @@ class LiuyaoPlugin(Star):
             group_switches[method] = bool(enabled)
             updated[str(group_id)] = group_switches
             await self.put_kv_data(METHOD_SWITCHES_KEY, updated)
+
+    async def _can_manage_switch(self, event: AstrMessageEvent) -> bool:
+        is_astrbot_admin = getattr(event, "is_admin", None)
+        if callable(is_astrbot_admin):
+            try:
+                if bool(is_astrbot_admin()):
+                    return True
+            except Exception as exc:
+                logger.warning(f"liuyao：读取 AstrBot 管理员身份失败：{exc}")
+        return await self._is_group_operator(event)
 
     async def _is_group_operator(self, event: AstrMessageEvent) -> bool:
         allowed_roles = {"owner", "admin"}

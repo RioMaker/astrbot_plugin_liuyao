@@ -2,7 +2,7 @@
   "default_enabled": {
     "type": "bool",
     "description": "各术数在新群中的默认状态",
-    "hint": "建议保持关闭。当前只有六爻；群主或群管理员可使用 /六爻 开 启用。",
+    "hint": "建议保持关闭。当前只有六爻；群主、群管理员或 AstrBot 管理员可使用 /六爻 开 启用。",
     "default": false
   },
   "allow_operator_api_lookup": {
