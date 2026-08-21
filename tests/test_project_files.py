@@ -17,7 +17,8 @@ def test_configuration_and_metadata_contract() -> None:
     assert config["agent_comment_timeout_seconds"]["default"] == 45
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
-    assert "version: \"0.4.3\"" in metadata
+    assert "show_disclaimer" not in config
+    assert "version: \"0.5.0\"" in metadata
     assert "aiocqhttp" in metadata
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert "Pillow>=10.0.0" in requirements

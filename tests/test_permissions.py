@@ -93,7 +93,7 @@ class _Event:
 
 def _make_enabled_plugin() -> LiuyaoPlugin:
     plugin = object.__new__(LiuyaoPlugin)
-    plugin.config = {"show_disclaimer": False}
+    plugin.config = {}
     plugin.corpus = ZhouyiCorpus(ROOT / "data" / "zhouyi.json")
     plugin.readings = ReadingService(
         plugin.corpus,
@@ -197,7 +197,7 @@ def test_bare_liuyao_content_casts_instantly() -> None:
             "今年适合换工作吗",
         )
     )
-    assert "六爻问卦｜传统文化参考" in result
+    assert "六爻问卦｜纳甲排盘" in result
     assert "方式：即时天机（简捷问卦）" in result
     assert "意图：综合" in result
     assert "所问：今年适合换工作吗" in result
@@ -293,9 +293,11 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     assert "图卡补全：当前会话模型已补全方向并生成短评（事业）" in result
     assert "AI短评：可可子：先核实机会与成本，再择稳妥时点推进。" in result
     assert "本卦六亲（初爻→上爻）" in result
-    assert "开头先明确列出本卦、之卦、动爻和六亲" in result
+    assert "不要复述本卦、之卦、动爻、六亲" in result
+    assert "断语：" in result
+    assert "不附加与卦义无关的固定套话" in result
 
-def test_plain_command_sends_local_chart_and_keeps_text(tmp_path) -> None:
+def test_plain_command_sends_local_chart_without_duplicate_text(tmp_path) -> None:
     class FakeRenderer:
         def __init__(self):
             self.kwargs = None
@@ -322,8 +324,21 @@ def test_plain_command_sends_local_chart_and_keeps_text(tmp_path) -> None:
     assert renderer.kwargs["comment_title"] == "排盘提示"
     assert renderer.kwargs["agent_name"] == "本地排盘"
     assert renderer.kwargs["intent_label"] == "事业"
-    assert "所问：今年是否适合换工作" in result
-    assert "本卦：" in result
+    assert result == ""
+
+    second_event = _Event("member")
+
+    async def collect_root_results():
+        return [
+            item
+            async for item in plugin.liuyao_command(
+                second_event,
+                "事业 今年是否适合换工作",
+            )
+        ]
+
+    assert asyncio.run(collect_root_results()) == []
+    assert len(second_event.sent) == 1
 
 def test_agent_chart_timeout_has_explicit_fallback_status() -> None:
     class TimeoutContext:
@@ -372,6 +387,8 @@ def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
     assert event.sent == []
     assert "卦象信息图：渲染器不可用，已回退为文字卦象" in result
     assert "本卦：" in result
+    assert "排盘图未能发送" in result
+    assert "断语：" in result
 
 
 

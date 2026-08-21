@@ -103,7 +103,7 @@ class LiuyaoImageRenderer:
         )
         comment_text = (
             f"{self._clean(agent_name) or 'AI助手'}："
-            f"{self._clean(ai_comment) or '卦象已成，宜结合现实信息审慎判断。'}"
+            f"{self._clean(ai_comment) or '卦象已成，当察动静、辨时位而取其宜。'}"
         )
         comment_lines = self._wrap(
             measure,
@@ -181,7 +181,7 @@ class LiuyaoImageRenderer:
         )
         draw.text(
             (MARGIN, y + 28),
-            "传统文化参考 · 请结合现实信息审慎决策",
+            "六爻纳甲 · 以象明理 · 以变察时",
             font=fonts["small"],
             fill=MUTED,
         )

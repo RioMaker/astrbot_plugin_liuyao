@@ -42,7 +42,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、分术数群开关与 Agent Tool"
-PLUGIN_VERSION = "0.4.3"
+PLUGIN_VERSION = "0.5.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -80,7 +80,7 @@ HELP_TEXT = """六爻起卦插件
 
 方向：综合、事业、感情、财富、学业、健康、家庭、出行。
 普通起卦指令会先发送详细排盘图；也可直接对 Agent 说“为我起一卦”，由 Agent 补全方向和署名短评。
-说明：结果用于传统文化体验与自我反思，不替代现实决策或专业意见。"""
+六爻承古法以察时变，解读以卦象、爻辞、六亲与所问为据。"""
 
 
 @register(
@@ -122,9 +122,9 @@ class LiuyaoPlugin(Star):
         content: GreedyStr,
     ):
         """六爻根指令；未命中保留子命令时，将全部参数作为问卦内容。"""
-        yield event.plain_result(
-            await self._dispatch_liuyao(event, str(content or ""))
-        )
+        reply = await self._dispatch_liuyao(event, str(content or ""))
+        if reply:
+            yield event.plain_result(reply)
 
     @filter.command("起卦", alias={"divination"})
     async def divination_command(
@@ -138,9 +138,9 @@ class LiuyaoPlugin(Star):
             yield event.plain_result("当前仅支持六爻。\n\n" + HELP_TEXT)
             return
         liuyao_tail = parts[1].strip() if len(parts) == 2 else ""
-        yield event.plain_result(
-            await self._dispatch_liuyao(event, liuyao_tail)
-        )
+        reply = await self._dispatch_liuyao(event, liuyao_tail)
+        if reply:
+            yield event.plain_result(reply)
     # ------------------------------------------------------------------
     # Agent tools
     # ------------------------------------------------------------------
@@ -154,7 +154,7 @@ class LiuyaoPlugin(Star):
         manual_lines: str = "",
         agent_name: str = "",
     ) -> str:
-        """为当前 QQ 群起六爻卦，先发送详细排盘图，再返回 Agent 古籍上下文。
+        """为当前 QQ 群起六爻卦并发送排盘图；图成功后直接解卦并以断语收尾。
 
         Args:
             mode(string): 起卦方式，instant=即时天机；manual=手摇结果或直接指定卦名
@@ -230,8 +230,20 @@ class LiuyaoPlugin(Star):
             question=limited_question,
             method=method,
             for_agent=True,
-            show_disclaimer=True,
         )
+        chart_sent = chart_status.startswith("已在工具返回前发送")
+        if chart_sent:
+            final_requirement = (
+                "排盘图已成功发送；不要复述本卦、之卦、动爻、六亲、方式等"
+                "图中已有信息，直接围绕用户所问解卦并给出明确建议，最后另起"
+                "一行以“断语：”写一句简练结论；不附加与卦义无关的固定套话。"
+            )
+        else:
+            final_requirement = (
+                "排盘图未能发送；先简要列出本卦、之卦、动爻和六亲，再围绕"
+                "用户所问解卦，最后另起一行以“断语：”写一句简练结论；"
+                "不附加与卦义无关的固定套话。"
+            )
         caster_name, caster_id = self._caster_identity(event)
         return (
             f"{reading}\n"
@@ -240,8 +252,7 @@ class LiuyaoPlugin(Star):
             f"图卡补全：{enrichment_status}\n"
             f"AI短评：{display_agent_name}：{ai_comment}\n"
             f"卦象信息图：{chart_status}\n"
-            "Agent最终回复要求：开头先明确列出本卦、之卦、动爻和六亲，"
-            "再进行解释；不要跳过卦象信息。"
+            f"Agent最终回复要求：{final_requirement}"
         )
 
     @filter.llm_tool(name="lookup_zhouyi_text")
@@ -415,7 +426,7 @@ class LiuyaoPlugin(Star):
             "只输出一个JSON对象，不要Markdown，不要解释："
             '{"intent":"事业","comment":"一句简短评语"}。'
             "comment控制在16至48个汉字，不带Agent姓名前缀；"
-            "语气审慎、条件式、可执行，不断言吉凶，不杜撰古籍原文。"
+            "短评只写卦义判断与建议，不附加其他固定套话；不杜撰古籍原文。"
         )
 
     def _parse_chart_enrichment(
@@ -486,7 +497,7 @@ class LiuyaoPlugin(Star):
     def _fallback_chart_comment(cast: CastResult) -> str:
         if cast.moving_lines:
             return "动爻提示局势仍在变化，宜先核实关键条件，再稳步推进。"
-        return "卦象安静，宜守住当前主线，结合现实条件审慎判断。"
+        return "卦象安静，宜守当前主线，察时待变。"
 
     def _agent_display_name(self, value: str) -> str:
         fallback = str(
@@ -768,15 +779,14 @@ class LiuyaoPlugin(Star):
             enabled_key="command_send_chart_image",
             source="指令",
         )
+        if chart_status.startswith("已发送"):
+            return ""
         reading = self.readings.render(
             cast,
             intent=intent,
             question=question,
             method=method,
-            show_disclaimer=self._show_disclaimer(),
         )
-        if chart_status.startswith("已发送"):
-            return reading
         return f"排盘图：{chart_status}\n\n{reading}"
 
     async def _switch_reply(
@@ -915,8 +925,6 @@ class LiuyaoPlugin(Star):
             return bool(method_defaults[method])
         return bool(self._config_get("default_enabled", False))
 
-    def _show_disclaimer(self) -> bool:
-        return bool(self._config_get("show_disclaimer", True))
 
     def _limited_question(self, value: str) -> str:
         limit = int(self._config_get("max_question_length", 200) or 200)

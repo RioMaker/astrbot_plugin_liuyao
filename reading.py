@@ -47,7 +47,6 @@ class ReadingService:
         question: str,
         method: str,
         for_agent: bool = False,
-        show_disclaimer: bool = True,
     ) -> str:
         intent_key = self.normalize_intent(intent)
         profile = self.directions[intent_key]
@@ -61,7 +60,7 @@ class ReadingService:
         )
 
         rows = [
-            "六爻问卦｜传统文化参考",
+            "六爻问卦｜纳甲排盘",
             f"方式：{method}",
             f"意图：{profile['label']}",
         ]
@@ -117,16 +116,15 @@ class ReadingService:
             rows.extend(
                 [
                     "Agent解读约束：",
-                    "1. 最终回复开头先列出本卦、之卦、动爻、六亲、起卦方式与所问，再开始解释。",
-                    "2. 图中AI短评是现代提示，不得当作古籍原文引用。",
-                    "3. 原文只可引用上列卦辞、动爻辞、之卦卦辞；不要杜撰古籍原句。",
-                    "4. 无动爻重本卦；有动爻优先解释动爻，之卦只作为变化趋势。",
-                    f"5. 围绕“{profile['label']}”关注点作条件式分析，给出可执行建议，避免断言必然结果。",
-                    "6. 明确说明这是传统文化解读，不替代医疗、法律、投资或其他专业意见。",
+                    "1. 图中AI短评是现代提示，不得当作古籍原文引用。",
+                    "2. 原文只可引用上列卦辞、动爻辞、之卦卦辞；不要杜撰古籍原句。",
+                    "3. 无动爻重本卦；有动爻优先解释动爻，之卦只作为变化趋势。",
+                    f"4. 围绕“{profile['label']}”关注点分析，给出切合所问的判断与建议。",
+                    "5. 最终回复须以单独一行“断语：……”收尾，断语应明确、简练。",
+                    "6. 只保留六爻解读，不附加与卦义无关的固定套话。",
                 ]
             )
-        elif show_disclaimer:
-            rows.append("提示：问卦仅作传统文化与自我反思参考，不替代专业意见或现实决策。")
+
         return "\n".join(rows)
 
 

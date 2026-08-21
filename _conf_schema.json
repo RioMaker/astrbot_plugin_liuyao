@@ -52,11 +52,6 @@
     "description": "六爻信息图自定义中文字体路径",
     "hint": "通常留空使用插件内置 Noto Sans CJK；也可填写自定义 .ttf/.ttc/.otf 绝对路径。路径无效时自动回退到内置字体。",
     "default": ""
-  },
-  "show_disclaimer": {
-    "type": "bool",
-    "description": "指令结果显示传统文化参考提示",
-    "default": true
   }
 }
 
