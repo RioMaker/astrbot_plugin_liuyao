@@ -1,0 +1,25 @@
+{
+  "default_enabled": {
+    "type": "bool",
+    "description": "新群默认开启",
+    "hint": "建议保持关闭，由每个 QQ 群群主使用 /问卦 开关 开 来启用。",
+    "default": false
+  },
+  "allow_owner_api_lookup": {
+    "type": "bool",
+    "description": "缺少原始角色字段时查询群成员资料",
+    "hint": "仅调用 OneBot get_group_member_info 读取身份，不执行管理操作。",
+    "default": true
+  },
+  "max_question_length": {
+    "type": "int",
+    "description": "问题文本最大长度",
+    "hint": "超出部分会被截断，允许范围 20-1000。",
+    "default": 200
+  },
+  "show_disclaimer": {
+    "type": "bool",
+    "description": "指令结果显示传统文化参考提示",
+    "default": true
+  }
+}

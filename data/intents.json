@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "directions": {
+    "general": {
+      "label": "综合",
+      "aliases": ["总体", "运势", "综合运势"],
+      "focus": ["当前处境", "主要变化", "可行动之处", "应回避的风险"]
+    },
+    "career": {
+      "label": "事业",
+      "aliases": ["工作", "职业", "career"],
+      "focus": ["时机", "职责与位置", "协作关系", "进退节奏"]
+    },
+    "relationship": {
+      "label": "感情",
+      "aliases": ["姻缘", "恋爱", "relationship"],
+      "focus": ["双方状态", "沟通", "边界", "关系变化"]
+    },
+    "wealth": {
+      "label": "财富",
+      "aliases": ["财运", "钱财", "wealth"],
+      "focus": ["现金流", "风险承受", "交易条件", "守成与扩张"]
+    },
+    "study": {
+      "label": "学业",
+      "aliases": ["考试", "学习", "study"],
+      "focus": ["基础", "方法", "节奏", "反馈与修正"]
+    },
+    "health": {
+      "label": "健康",
+      "aliases": ["身体", "康复", "health"],
+      "focus": ["作息与压力", "变化信号", "求助时机", "可持续习惯"]
+    },
+    "family": {
+      "label": "家庭",
+      "aliases": ["家宅", "亲人", "family"],
+      "focus": ["家庭角色", "沟通", "资源安排", "长期稳定"]
+    },
+    "travel": {
+      "label": "出行",
+      "aliases": ["迁移", "远行", "travel"],
+      "focus": ["路线与时机", "准备", "阻碍", "备用方案"]
+    }
+  },
+  "curated_readings": [
+    {
+      "hexagram": 1,
+      "intent": "career",
+      "source": "《周易·乾·九五》",
+      "quote": "飛龍在天，利見大人。",
+      "guidance": "若条件成熟，可主动承担责任并争取关键支持；仍需结合动爻判断是否已经到位。"
+    },
+    {
+      "hexagram": 2,
+      "intent": "family",
+      "source": "《周易·坤·六二》",
+      "quote": "直方大，不習无不利。",
+      "guidance": "重视诚实、边界和稳定承托，先把基本秩序做好。"
+    },
+    {
+      "hexagram": 15,
+      "intent": "study",
+      "source": "《周易·謙·初六》",
+      "quote": "謙謙君子，用涉大川，吉。",
+      "guidance": "以谦逊和持续练习推进难题，比急于证明自己更有利。"
+    },
+    {
+      "hexagram": 29,
+      "intent": "health",
+      "source": "《周易·坎》",
+      "quote": "習坎，有孚，維心亨，行有尚。",
+      "guidance": "面对反复压力要建立稳定支持与专业求助，不把卦象当作诊断。"
+    },
+    {
+      "hexagram": 31,
+      "intent": "relationship",
+      "source": "《周易·咸·九四》",
+      "quote": "貞吉悔亡，憧憧往來，朋從爾思。",
+      "guidance": "先确认自身立场与边界，再观察往来是否真诚而稳定。"
+    },
+    {
+      "hexagram": 39,
+      "intent": "travel",
+      "source": "《周易·蹇》",
+      "quote": "利西南，不利東北；利見大人，貞吉。",
+      "guidance": "遇阻时优先调整路线并寻求可靠协助，不宜只凭惯性硬闯。"
+    },
+    {
+      "hexagram": 42,
+      "intent": "wealth",
+      "source": "《周易·益》",
+      "quote": "利有攸往，利涉大川。",
+      "guidance": "有利于投入能形成真实增益的行动，但仍应先设风险边界。"
+    },
+    {
+      "hexagram": 53,
+      "intent": "relationship",
+      "source": "《周易·漸》",
+      "quote": "女歸吉，利貞。",
+      "guidance": "强调循序、承诺和长期一致性，不宜用短期情绪替代关系建设。"
+    },
+    {
+      "hexagram": 63,
+      "intent": "career",
+      "source": "《周易·既濟》",
+      "quote": "亨小，利貞；初吉終亂。",
+      "guidance": "接近完成时更要检查收尾、交接和后续维护。"
+    },
+    {
+      "hexagram": 64,
+      "intent": "general",
+      "source": "《周易·未濟》",
+      "quote": "亨。小狐汔濟，濡其尾，无攸利。",
+      "guidance": "事情尚未定型，最后阶段尤其需要核对条件并留出余量。"
+    }
+  ]
+}
