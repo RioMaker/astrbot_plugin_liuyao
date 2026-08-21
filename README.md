@@ -10,11 +10,11 @@
   - 接受六个 6/7/8/9；
   - 接受六组三枚铜币字符；
   - 接受 `乾`、`乾为天`、`天风姤`、`第1卦`、`䷀` 等卦名，按无动爻静卦处理。
-- 离线古籍：内置文王卦序 64 卦、64 条卦辞和 384 条基础爻辞；乾、坤另保留用九/用六。
+- 离线古籍：内置文王卦序 64 卦、64 条卦辞和 384 条基础爻辞；乾、坤另保留用九/用六。`najia.py` 按八宫、纳甲地支和五行生克计算每爻六亲。
 - 意图方向：综合、事业、感情、财富、学业、健康、家庭、出行。
 - 分术数开关：保存结构为“群 → 术数 → 状态”；当前只有六爻，后续增加其他术数不会共用同一个开关。
 - 权限：QQ 群主和 QQ 群管理员都可以设置本群术数开关。
-- Agent 调用：提供 `cast_liuyao` 和 `lookup_zhouyi_text` 两个工具。
+- Agent 调用：`cast_liuyao` 成卦后让当前会话模型补全缺失方向并生成署名短评，再先发送含六亲的排盘图；另提供 `lookup_zhouyi_text` 查询工具。
 
 ## 指令
 
@@ -83,22 +83,40 @@
 
 ## Agent 用法
 
-用户可以直接说“为我起一卦问事业”。Agent 可调用：
+用户可以直接说“为我起一卦问事业”，也可以不写方向说“为我起一卦看看最近的工作变化”。Agent 可调用：
 
-- `cast_liuyao(mode, intent, question, manual_lines)`：即时起卦，或在 manual 模式传入六爻结果/卦名。
+- `cast_liuyao(mode, intent, question, manual_lines, agent_name)`：即时起卦，或在 manual 模式传入六爻结果/卦名；Agent 应把自身人格名（如“可可子”）传入 `agent_name`。
 - `lookup_zhouyi_text(hexagram, line)`：按文王卦序查询卦辞或某一爻原文。
+
+`cast_liuyao` 的执行顺序固定为：
+
+1. 完成起卦，先取得本卦、之卦、卦宫及纳甲六亲；
+2. 调用当前会话模型，根据已经生成的卦象写一条简短评语；用户没说方向时，同时从问题中补全方向；
+3. 用 Agent 传入的自称署名，例如 `可可子：先核实机会与成本，再择稳妥时点推进。`；
+4. 生成本地 PNG，并在 Tool 返回前主动发送到当前 QQ 群；
+5. 将完整卦象、六亲、卦爻辞和回复约束返回给 Agent；
+6. Agent 最终回复先列出本卦、之卦、动爻、六亲、方式和所问，再进行解释。
+
+排盘图包含起卦人群昵称、QQ、群号、日期时间、问卦方向、问题、本卦、之卦、卦宫五行、每爻六亲与纳甲地支、六爻阴阳、动爻、AI 署名短评、卦辞和相关动爻辞。变卦六亲按传统规则沿用本卦卦宫五行。
+
+短评调用超时、模型输出异常或图片发送失败时都会自动回退，不阻断完整文字卦象和 Agent 回答。启用 AI 短评会额外产生一次较短的当前模型调用。
 
 工具只在已启用六爻的 QQ 群内工作。普通指令不会自动调用模型；通过 Agent 使用时，由当前 Agent 对工具结果进行解释。
 
 ## 安装与配置
 
-把本目录放入 AstrBot 的 `data/plugins/`，在 WebUI 重载插件。最低 AstrBot 版本为 4.9.2。
+把本目录放入 AstrBot 的 `data/plugins/`，在 WebUI 重载插件。最低 AstrBot 版本为 4.9.2；运行时依赖 Pillow，AstrBot 会根据 `requirements.txt` 安装。
 
 配置项：
 
 - `default_enabled`：各术数在新群中的默认状态，建议保持 `false`。
 - `allow_operator_api_lookup`：原始事件缺少 `sender.role` 时，读取 OneBot 群成员资料核验群主/群管理员。
 - `max_question_length`：问题最大长度。
+- `agent_send_chart_image`：Agent 起卦时是否先发送排盘图，默认为 `true`。
+- `agent_generate_chart_comment`：是否使用当前会话模型生成图中短评并补全缺失方向，默认为 `true`。
+- `agent_display_name`：Agent 没传入自身名字时使用的默认短评署名。
+- `agent_comment_timeout_seconds`：短评生成超时，范围 5–90 秒，默认 30 秒。
+- `chart_font_path`：可选中文 `.ttf`/`.ttc` 字体绝对路径；留空会自动检测微软雅黑、黑体、Noto Sans CJK 或苹方。
 - `show_disclaimer`：普通指令是否显示传统文化参考提示。
 
 ## 数据与扩充
@@ -117,4 +135,6 @@ python -m ruff check .
 ## 说明
 
 起卦内容用于传统文化体验与自我反思，不应替代医疗、法律、投资或其他专业意见，也不应被表述为必然预言。
+
+
 

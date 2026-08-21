@@ -17,9 +17,42 @@
     "hint": "超出部分会被截断，允许范围 20-1000。",
     "default": 200
   },
+  "agent_send_chart_image": {
+    "type": "bool",
+    "description": "Agent 起卦时先发送六爻信息图",
+    "hint": "默认开启。图片包含卦象、动爻、起卦人、群号、时间、问题及古籍卦爻辞。",
+    "default": true
+  },
+  "agent_generate_chart_comment": {
+    "type": "bool",
+    "description": "Agent 起卦后调用当前会话模型生成图中短评",
+    "hint": "默认开启。模型会在成卦后生成简短审慎评语；若用户未给方向，也会根据问题补全方向。",
+    "default": true
+  },
+  "agent_display_name": {
+    "type": "string",
+    "description": "AI 短评默认署名",
+    "hint": "当 Agent 调用工具时未主动传入自身名字，使用此值，例如“可可子”。",
+    "default": "AI助手"
+  },
+  "agent_comment_timeout_seconds": {
+    "type": "int",
+    "description": "生成图中 AI 短评的超时秒数",
+    "hint": "允许范围 5-90；超时或模型失败时自动使用本地保守提示，不影响发图和文字解卦。",
+    "default": 30
+  },
+  "chart_font_path": {
+    "type": "string",
+    "description": "六爻信息图自定义中文字体路径",
+    "hint": "通常留空自动检测微软雅黑、黑体、Noto Sans CJK 或苹方；服务器缺少中文字体时可填写 .ttf/.ttc 绝对路径。",
+    "default": ""
+  },
   "show_disclaimer": {
     "type": "bool",
     "description": "指令结果显示传统文化参考提示",
     "default": true
   }
 }
+
+
+

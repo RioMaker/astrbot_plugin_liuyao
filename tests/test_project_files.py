@@ -10,10 +10,16 @@ def test_configuration_and_metadata_contract() -> None:
     config = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
     assert config["default_enabled"]["default"] is False
     assert config["allow_operator_api_lookup"]["default"] is True
+    assert config["agent_send_chart_image"]["default"] is True
+    assert config["agent_generate_chart_comment"]["default"] is True
+    assert config["agent_display_name"]["default"] == "AI助手"
+    assert config["agent_comment_timeout_seconds"]["default"] == 30
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
-    assert "version: \"0.2.1\"" in metadata
+    assert "version: \"0.4.0\"" in metadata
     assert "aiocqhttp" in metadata
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert "Pillow>=10.0.0" in requirements
 
 
 def test_corpus_has_revision_attribution_and_special_lines() -> None:
@@ -47,5 +53,7 @@ def test_documented_sources_and_data_license_exist() -> None:
     assert "维基文库《周易》" in sources
     assert "中国哲学书电子化计划" in sources
     assert "CC BY-SA 4.0" in notice
+
+
 
 

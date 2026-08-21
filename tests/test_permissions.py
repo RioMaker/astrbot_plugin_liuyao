@@ -31,6 +31,7 @@ class _Filter:
 class _Logger:
     info = staticmethod(lambda *args, **kwargs: None)
     warning = staticmethod(lambda *args, **kwargs: None)
+    exception = staticmethod(lambda *args, **kwargs: None)
 
 
 astrbot = types.ModuleType("astrbot")
@@ -70,12 +71,23 @@ class _Message:
 class _Event:
     def __init__(self, role):
         self.message_obj = _Message(role)
+        self.sent = []
+        self.unified_msg_origin = "aiocqhttp:GroupMessage:10001"
 
     def get_group_id(self):
         return "10001"
 
     def get_sender_id(self):
         return "20002"
+
+    def get_sender_name(self):
+        return "测试群友"
+
+    def image_result(self, path):
+        return {"image": path}
+
+    async def send(self, message):
+        self.sent.append(message)
 
 
 def _make_enabled_plugin() -> LiuyaoPlugin:
@@ -217,3 +229,88 @@ def test_reserved_subcommands_remain_available() -> None:
     assert "方式：即时天机（三枚铜币等概率模拟）" in instant_result
     assert "意图：感情" in instant_result
     assert "所问：这段关系如何发展" in instant_result
+
+def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
+    class FakeRenderer:
+        def __init__(self):
+            self.kwargs = None
+
+        def render(self, cast, **kwargs):
+            assert cast.primary_number in range(1, 65)
+            self.kwargs = kwargs
+            output = tmp_path / "agent-chart.png"
+            output.write_bytes(b"fake-png")
+            return output
+
+    class FakeContext:
+        def __init__(self):
+            self.prompt = ""
+
+        async def get_current_chat_provider_id(self, *, umo):
+            assert umo == "aiocqhttp:GroupMessage:10001"
+            return "provider-1"
+
+        async def llm_generate(self, *, chat_provider_id, prompt):
+            assert chat_provider_id == "provider-1"
+            self.prompt = prompt
+            return types.SimpleNamespace(
+                completion_text=(
+                    '{"intent":"事业","comment":'
+                    '"先核实机会与成本，再择稳妥时点推进。"}'
+                )
+            )
+
+    plugin = _make_enabled_plugin()
+    renderer = FakeRenderer()
+    context = FakeContext()
+    plugin.renderer = renderer
+    plugin.context = context
+    event = _Event("member")
+
+    result = asyncio.run(
+        plugin.cast_liuyao_tool(
+            event,
+            mode="instant",
+            intent="",
+            question="今年适合换工作吗",
+            agent_name="可可子",
+        )
+    )
+
+    assert len(event.sent) == 1
+    assert event.sent[0]["image"].endswith("agent-chart.png")
+    assert not (tmp_path / "agent-chart.png").exists()
+    assert renderer.kwargs["caster_name"] == "测试群友"
+    assert renderer.kwargs["caster_id"] == "20002"
+    assert renderer.kwargs["group_id"] == "10001"
+    assert renderer.kwargs["intent_label"] == "事业（AI补全）"
+    assert renderer.kwargs["question"] == "今年适合换工作吗"
+    assert renderer.kwargs["agent_name"] == "可可子"
+    assert renderer.kwargs["ai_comment"] == "先核实机会与成本，再择稳妥时点推进。"
+    assert "当前Agent自称：可可子" in context.prompt
+    assert "卦象信息图：已在工具返回前发送到当前会话" in result
+    assert "图卡补全：当前会话模型已补全方向并生成短评（事业）" in result
+    assert "AI短评：可可子：先核实机会与成本，再择稳妥时点推进。" in result
+    assert "本卦六亲（初爻→上爻）" in result
+    assert "开头先明确列出本卦、之卦、动爻和六亲" in result
+
+def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
+    plugin = _make_enabled_plugin()
+    plugin.renderer = None
+    event = _Event("member")
+
+    result = asyncio.run(
+        plugin.cast_liuyao_tool(
+            event,
+            mode="instant",
+            intent="general",
+            question="近期运势如何",
+        )
+    )
+
+    assert event.sent == []
+    assert "卦象信息图：渲染器不可用，已回退为文字卦象" in result
+    assert "本卦：" in result
+
+
+

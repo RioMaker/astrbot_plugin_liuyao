@@ -9,9 +9,11 @@ from typing import Any
 try:
     from .corpus import ZhouyiCorpus
     from .divination import CastResult, render_diagram
+    from .najia import relatives_for_bits
 except ImportError:  # pragma: no cover - direct local execution
     from corpus import ZhouyiCorpus
     from divination import CastResult, render_diagram
+    from najia import relatives_for_bits
 
 
 class ReadingService:
@@ -52,6 +54,11 @@ class ReadingService:
         primary = self.corpus.get(cast.primary_number)
         changed = self.corpus.get(cast.changed_number)
         moving = cast.moving_lines
+        primary_relatives = relatives_for_bits(cast.primary_bits)
+        changed_relatives = relatives_for_bits(
+            cast.changed_bits,
+            reference_element=primary_relatives.palace_element,
+        )
 
         rows = [
             "六爻问卦｜传统文化参考",
@@ -70,6 +77,13 @@ class ReadingService:
                 ),
                 render_diagram(cast),
                 "六爻（初爻→上爻）：" + " ".join(str(value) for value in cast.lines),
+                (
+                    f"卦宫：{primary_relatives.palace}宫"
+                    f"（{primary_relatives.palace_element}，"
+                    f"{primary_relatives.palace_stage}）"
+                ),
+                "本卦六亲（初爻→上爻）："
+                + " ".join(line.label for line in primary_relatives.lines),
                 f"本卦卦辞：{primary['judgment']}",
             ]
         )
@@ -80,6 +94,10 @@ class ReadingService:
             )
             if len(moving) == 6 and primary.get("extra_lines"):
                 rows.append("全爻皆变：" + "；".join(primary["extra_lines"]))
+            rows.append(
+                "之卦六亲（沿用本卦宫五行，初爻→上爻）："
+                + " ".join(line.label for line in changed_relatives.lines)
+            )
             rows.append(f"之卦卦辞：{changed['judgment']}")
         else:
             rows.append("动爻：无；以本卦卦辞和整体卦象为主。")
@@ -99,12 +117,17 @@ class ReadingService:
             rows.extend(
                 [
                     "Agent解读约束：",
-                    "1. 原文只可引用上列卦辞、动爻辞、之卦卦辞；不要杜撰古籍原句。",
-                    "2. 无动爻重本卦；有动爻优先解释动爻，之卦只作为变化趋势。",
-                    f"3. 围绕“{profile['label']}”关注点作条件式分析，给出可执行建议，避免断言必然结果。",
-                    "4. 明确说明这是传统文化解读，不替代医疗、法律、投资或其他专业意见。",
+                    "1. 最终回复开头先列出本卦、之卦、动爻、六亲、起卦方式与所问，再开始解释。",
+                    "2. 图中AI短评是现代提示，不得当作古籍原文引用。",
+                    "3. 原文只可引用上列卦辞、动爻辞、之卦卦辞；不要杜撰古籍原句。",
+                    "4. 无动爻重本卦；有动爻优先解释动爻，之卦只作为变化趋势。",
+                    f"5. 围绕“{profile['label']}”关注点作条件式分析，给出可执行建议，避免断言必然结果。",
+                    "6. 明确说明这是传统文化解读，不替代医疗、法律、投资或其他专业意见。",
                 ]
             )
         elif show_disclaimer:
             rows.append("提示：问卦仅作传统文化与自我反思参考，不替代专业意见或现实决策。")
         return "\n".join(rows)
+
+
+
