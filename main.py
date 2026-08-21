@@ -9,13 +9,14 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.star.filter.command import GreedyStr
 
 if __package__:
     from .corpus import CorpusError, ZhouyiCorpus
     from .divination import (
+        CastResult,
         ManualCastError,
         cast_instant,
-        extract_subcommand_tail,
         parse_intent_and_question,
         parse_manual_cast,
         split_manual_payload,
@@ -24,9 +25,9 @@ if __package__:
 else:  # pragma: no cover - direct local execution
     from corpus import CorpusError, ZhouyiCorpus
     from divination import (
+        CastResult,
         ManualCastError,
         cast_instant,
-        extract_subcommand_tail,
         parse_intent_and_question,
         parse_manual_cast,
         split_manual_payload,
@@ -36,24 +37,43 @@ else:  # pragma: no cover - direct local execution
 
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
-PLUGIN_DESC = "面向 QQ 群的六爻问卦：即时起卦、手动铜币起卦、群主开关与 Agent Tool"
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、分术数群开关与 Agent Tool"
+PLUGIN_VERSION = "0.2.1"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
-SWITCHES_KEY = "group_switches"
 
-HELP_TEXT = """六爻问卦插件
-指令：
-/问卦 即时 [方向] [问题]
-  例：/问卦 即时 事业 今年是否适合换工作
-/问卦 手动 <六爻> [方向] [问题]
-  例：/问卦 手动 7 8 9 6 7 8 感情 这段关系该如何推进
-  六爻必须按“初爻→上爻”（自下而上）填写。
+METHOD_SWITCHES_KEY = "method_switches"
+LEGACY_SWITCHES_KEY = "group_switches"
+METHOD_LIUYAO = "liuyao"
+METHOD_LABELS = {METHOD_LIUYAO: "六爻"}
+
+HELP_TEXT = """六爻起卦插件
+等价指令入口：
+/六爻 ...
+/起卦 六爻 ...
+
+起卦：
+/六爻 <问卦内容>
+  例：/六爻 今年适合换工作吗
+  例：/六爻 事业 今年适合换工作吗
+/起卦 六爻 <问卦内容>
+/六爻 即时 [方向] [问题]
+  例：/六爻 即时 事业 今年是否适合换工作
+/六爻 手动 <六爻或卦名> [方向] [问题]
+  例：/六爻 手动 7 8 9 6 7 8 感情 这段关系该如何推进
+  例：/六爻 手动 乾为天 事业 这个项目如何推进
+  六爻数字必须按“初爻→上爻”（自下而上）填写。
   数字：6老阴、7少阳、8少阴、9老阳。
   也可输入六组三币，如：正反反 正正反 正正正 反反反 正反反 正正反
   约定：正/字/阳/H=3，反/花/阴/T=2。
-/问卦 开关 开|关|状态
-  仅当前 QQ 群群主可控制。
-/问卦 help
+  卦名支持：乾、乾为天、天风姤、第1卦、䷀ 等；直接指定卦名按无动爻静卦处理。
+
+开关（按术数分别保存）：
+/六爻 开
+/六爻 关
+/六爻 状态
+/起卦 六爻 开|关|状态
+  当前只有“六爻”一种术数；QQ 群主或 QQ 群管理员可以设置。
+
 方向：综合、事业、感情、财富、学业、健康、家庭、出行。
 也可直接对 Agent 说“为我起一卦问事业”，由 Agent 调用 cast_liuyao。
 说明：结果用于传统文化体验与自我反思，不替代现实决策或专业意见。"""
@@ -79,101 +99,38 @@ class LiuyaoPlugin(Star):
         self._switch_lock = asyncio.Lock()
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
 
-    @filter.command_group("问卦", alias={"六爻", "liunyao"})
-    def liuyao():
-        """六爻问卦指令组。"""
-
-    @liuyao.command("help", alias={"帮助", "说明"})
-    async def help_command(self, event: AstrMessageEvent):
-        """查看六爻问卦插件帮助。"""
-        yield event.plain_result(HELP_TEXT)
-
-    @liuyao.command("即时", alias={"天机", "instant"})
-    async def instant_command(self, event: AstrMessageEvent):
-        """即时天机起卦，不需要手摇铜币。"""
-        error = await self._group_gate(event)
-        if error:
-            yield event.plain_result(error)
-            return
-
-        tail = extract_subcommand_tail(
-            self._message_text(event),
-            {"即时", "天机", "instant"},
-        )
-        intent, question = parse_intent_and_question(tail)
-        cast = cast_instant()
+    # ------------------------------------------------------------------
+    # 两条等价根指令：自由文本与保留子命令都由插件统一分派。
+    # ------------------------------------------------------------------
+    @filter.command("六爻", alias={"liunyao"})
+    async def liuyao_command(
+        self,
+        event: AstrMessageEvent,
+        content: GreedyStr,
+    ):
+        """六爻根指令；未命中保留子命令时，将全部参数作为问卦内容。"""
         yield event.plain_result(
-            self.readings.render(
-                cast,
-                intent=intent,
-                question=self._limited_question(question),
-                method="即时天机（三枚铜币等概率模拟）",
-                show_disclaimer=self._show_disclaimer(),
-            )
+            await self._dispatch_liuyao(event, str(content or ""))
         )
 
-    @liuyao.command("手动", alias={"manual", "铜币"})
-    async def manual_command(self, event: AstrMessageEvent):
-        """按用户手摇铜币的结果起卦。"""
-        error = await self._group_gate(event)
-        if error:
-            yield event.plain_result(error)
+    @filter.command("起卦", alias={"divination"})
+    async def divination_command(
+        self,
+        event: AstrMessageEvent,
+        content: GreedyStr,
+    ):
+        """术数总入口；当前支持 /起卦 六爻 ...。"""
+        parts = str(content or "").strip().split(maxsplit=1)
+        if not parts or parts[0].lower() not in {"六爻", "liunyao"}:
+            yield event.plain_result("当前仅支持六爻。\n\n" + HELP_TEXT)
             return
-
-        tail = extract_subcommand_tail(
-            self._message_text(event),
-            {"手动", "manual", "铜币"},
-        )
-        try:
-            manual_text, remainder = split_manual_payload(tail)
-            cast = parse_manual_cast(manual_text)
-        except ManualCastError as exc:
-            yield event.plain_result(
-                f"手动起卦输入有误：{exc}\n"
-                "示例：/问卦 手动 7 8 9 6 7 8 事业 是否适合换工作"
-            )
-            return
-
-        intent, question = parse_intent_and_question(remainder)
+        liuyao_tail = parts[1].strip() if len(parts) == 2 else ""
         yield event.plain_result(
-            self.readings.render(
-                cast,
-                intent=intent,
-                question=self._limited_question(question),
-                method="手动铜币",
-                show_disclaimer=self._show_disclaimer(),
-            )
+            await self._dispatch_liuyao(event, liuyao_tail)
         )
-
-    @liuyao.command("开关", alias={"switch"})
-    async def switch_command(self, event: AstrMessageEvent):
-        """仅 QQ 群群主可查看或改变本群插件开关。"""
-        group_id = str(event.get_group_id() or "").strip()
-        if not group_id:
-            yield event.plain_result("开关指令只能在 QQ 群聊中使用。")
-            return
-        if not await self._is_group_owner(event):
-            yield event.plain_result("无权限：只有当前 QQ 群群主可以控制问卦开关。")
-            return
-
-        tail = extract_subcommand_tail(
-            self._message_text(event),
-            {"开关", "switch"},
-        ).lower()
-        if tail in {"", "状态", "status"}:
-            enabled = await self._is_group_enabled(group_id)
-            yield event.plain_result(f"本群问卦功能当前为：{'开启' if enabled else '关闭'}。")
-            return
-        if tail in {"开", "开启", "启用", "on", "true", "1"}:
-            await self._set_group_enabled(group_id, True)
-            yield event.plain_result("本群问卦功能已开启。")
-            return
-        if tail in {"关", "关闭", "停用", "off", "false", "0"}:
-            await self._set_group_enabled(group_id, False)
-            yield event.plain_result("本群问卦功能已关闭。")
-            return
-        yield event.plain_result("用法：/问卦 开关 开|关|状态")
-
+    # ------------------------------------------------------------------
+    # Agent tools
+    # ------------------------------------------------------------------
     @filter.llm_tool(name="cast_liuyao")
     async def cast_liuyao_tool(
         self,
@@ -186,12 +143,12 @@ class LiuyaoPlugin(Star):
         """为当前 QQ 群会话起六爻卦，并返回可供 Agent 解读的完整古籍上下文。
 
         Args:
-            mode(string): 起卦方式，instant=即时天机；manual=使用用户手摇结果
+            mode(string): 起卦方式，instant=即时天机；manual=手摇结果或直接指定卦名
             intent(string): 问卦方向，可选 general/career/relationship/wealth/study/health/family/travel 或对应中文
             question(string): 用户所问的具体问题，可省略
-            manual_lines(string): mode=manual 时必填，自下而上的六个 6/7/8/9，例如“7 8 9 6 7 8”
+            manual_lines(string): mode=manual 时填写六个 6/7/8/9，或填写乾、乾为天、第1卦等卦名
         """
-        error = await self._group_gate(event)
+        error = await self._group_gate(event, METHOD_LIUYAO)
         if error:
             return error
 
@@ -202,9 +159,14 @@ class LiuyaoPlugin(Star):
         elif normalized_mode in {"manual", "手动", "铜币"}:
             try:
                 cast = parse_manual_cast(manual_lines)
-            except ManualCastError as exc:
-                return f"手动起卦输入有误：{exc}"
-            method = "手动铜币"
+                method = "手动铜币"
+            except ManualCastError:
+                try:
+                    row = self.corpus.resolve(manual_lines)
+                except CorpusError as exc:
+                    return f"手动起卦输入有误：{exc}"
+                cast = self._cast_from_hexagram(row)
+                method = f"手动指定卦名（{row['name']}静卦）"
         else:
             return "mode 只能是 instant 或 manual"
 
@@ -230,7 +192,7 @@ class LiuyaoPlugin(Star):
             hexagram(number): 文王卦序，1 到 64
             line(number): 0 返回卦辞；1 到 6 返回初爻至上爻的对应爻辞
         """
-        error = await self._group_gate(event)
+        error = await self._group_gate(event, METHOD_LIUYAO)
         if error:
             return error
         try:
@@ -238,30 +200,207 @@ class LiuyaoPlugin(Star):
         except (CorpusError, TypeError, ValueError) as exc:
             return f"查询参数错误：{exc}"
 
-    async def _group_gate(self, event: AstrMessageEvent) -> str:
+    # ------------------------------------------------------------------
+    # Shared command implementations
+    # ------------------------------------------------------------------
+    async def _dispatch_liuyao(
+        self,
+        event: AstrMessageEvent,
+        tail: str,
+    ) -> str:
+        """分派保留子命令；其他全部文本按即时问卦内容处理。"""
+        text = (tail or "").strip()
+        if not text:
+            return HELP_TEXT
+
+        parts = text.split(maxsplit=1)
+        token = parts[0].lower()
+        remainder = parts[1].strip() if len(parts) == 2 else ""
+
+        if token in {"help", "帮助", "说明"}:
+            return HELP_TEXT
+        if token in {"即时", "天机", "instant"}:
+            return await self._instant_reply(event, remainder)
+        if token in {"手动", "manual", "铜币"}:
+            return await self._manual_reply(event, remainder)
+        if token in {"开", "开启", "启用", "on"}:
+            return await self._switch_reply(event, METHOD_LIUYAO, True)
+        if token in {"关", "关闭", "停用", "off"}:
+            return await self._switch_reply(event, METHOD_LIUYAO, False)
+        if token in {"状态", "status"}:
+            return await self._switch_reply(event, METHOD_LIUYAO, None)
+        if token in {"开关", "switch"}:
+            desired = self._parse_switch_state(remainder)
+            if desired == "invalid":
+                return (
+                    "用法：/六爻 开|关|状态"
+                    "（旧写法：/六爻 开关 开|关|状态）"
+                )
+            return await self._switch_reply(event, METHOD_LIUYAO, desired)
+
+        return await self._content_reply(event, text)
+
+    async def _content_reply(
+        self,
+        event: AstrMessageEvent,
+        content: str,
+    ) -> str:
+        """把自由文本解析为可选方向和问题，并直接即时起卦。"""
+        error = await self._group_gate(event, METHOD_LIUYAO)
+        if error:
+            return error
+        intent, question = parse_intent_and_question(content)
+        return self.readings.render(
+            cast_instant(),
+            intent=intent,
+            question=self._limited_question(question),
+            method="即时天机（简捷问卦）",
+            show_disclaimer=self._show_disclaimer(),
+        )
+
+    async def _instant_reply(
+        self,
+        event: AstrMessageEvent,
+        tail: str,
+    ) -> str:
+        error = await self._group_gate(event, METHOD_LIUYAO)
+        if error:
+            return error
+        intent, question = parse_intent_and_question(tail)
+        return self.readings.render(
+            cast_instant(),
+            intent=intent,
+            question=self._limited_question(question),
+            method="即时天机（三枚铜币等概率模拟）",
+            show_disclaimer=self._show_disclaimer(),
+        )
+
+    async def _manual_reply(
+        self,
+        event: AstrMessageEvent,
+        tail: str,
+    ) -> str:
+        error = await self._group_gate(event, METHOD_LIUYAO)
+        if error:
+            return error
+
+        try:
+            manual_text, remainder = split_manual_payload(tail)
+            cast = parse_manual_cast(manual_text)
+            method = "手动铜币"
+        except ManualCastError as numeric_error:
+            parts = tail.split(maxsplit=1)
+            if not parts or parts[0].isdigit():
+                return self._manual_error(numeric_error)
+            try:
+                row = self.corpus.resolve(parts[0])
+            except CorpusError:
+                return self._manual_error(numeric_error)
+            cast = self._cast_from_hexagram(row)
+            remainder = parts[1].strip() if len(parts) == 2 else ""
+            method = f"手动指定卦名（{row['name']}静卦）"
+
+        intent, question = parse_intent_and_question(remainder)
+        return self.readings.render(
+            cast,
+            intent=intent,
+            question=self._limited_question(question),
+            method=method,
+            show_disclaimer=self._show_disclaimer(),
+        )
+    async def _switch_reply(
+        self,
+        event: AstrMessageEvent,
+        method: str,
+        desired: bool | None,
+    ) -> str:
         group_id = str(event.get_group_id() or "").strip()
         if not group_id:
-            return "六爻问卦仅面向 QQ 群聊使用。"
-        if not await self._is_group_enabled(group_id):
-            return "本群问卦功能尚未开启，请群主发送 /问卦 开关 开。"
+            return "开关指令只能在 QQ 群聊中使用。"
+        if not await self._is_group_operator(event):
+            return "无权限：只有当前 QQ 群主或 QQ 群管理员可以设置术数开关。"
+
+        label = METHOD_LABELS.get(method, method)
+        if desired is None:
+            enabled = await self._is_method_enabled(group_id, method)
+            return f"本群“{label}”功能当前为：{'开启' if enabled else '关闭'}。"
+        await self._set_method_enabled(group_id, method, desired)
+        return f"本群“{label}”功能已{'开启' if desired else '关闭'}。"
+
+    def _manual_error(self, exc: Exception) -> str:
+        return (
+            f"手动起卦输入有误：{exc}\n"
+            "示例一：/六爻 手动 7 8 9 6 7 8 事业 是否适合换工作\n"
+            "示例二：/六爻 手动 乾为天 事业 这个项目如何推进"
+        )
+
+    @staticmethod
+    def _cast_from_hexagram(row: dict[str, Any]) -> CastResult:
+        bits = str(row["binary_bottom_up"])
+        if len(bits) != 6 or any(bit not in {"0", "1"} for bit in bits):
+            raise CorpusError("卦象二进制数据无效")
+        lines = tuple(7 if bit == "1" else 8 for bit in bits)
+        return CastResult(lines)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _parse_switch_state(value: str) -> bool | None | str:
+        normalized = (value or "").strip().lower()
+        if normalized in {"", "状态", "status"}:
+            return None
+        if normalized in {"开", "开启", "启用", "on", "true", "1"}:
+            return True
+        if normalized in {"关", "关闭", "停用", "off", "false", "0"}:
+            return False
+        return "invalid"
+
+    # ------------------------------------------------------------------
+    # Per-group, per-divination-method state and QQ role checks
+    # ------------------------------------------------------------------
+    async def _group_gate(self, event: AstrMessageEvent, method: str) -> str:
+        group_id = str(event.get_group_id() or "").strip()
+        if not group_id:
+            return "六爻起卦仅面向 QQ 群聊使用。"
+        if not await self._is_method_enabled(group_id, method):
+            label = METHOD_LABELS.get(method, method)
+            return (
+                f"本群“{label}”功能尚未开启，"
+                f"请群主或管理员发送 /{label} 开。"
+            )
         return ""
 
-    async def _is_group_enabled(self, group_id: str) -> bool:
-        switches = await self.get_kv_data(SWITCHES_KEY, {})
-        if not isinstance(switches, dict):
-            switches = {}
-        return bool(switches.get(group_id, self._default_enabled()))
+    async def _is_method_enabled(self, group_id: str, method: str) -> bool:
+        switches = await self.get_kv_data(METHOD_SWITCHES_KEY, {})
+        if isinstance(switches, dict):
+            group_switches = switches.get(str(group_id))
+            if isinstance(group_switches, dict) and method in group_switches:
+                return bool(group_switches[method])
 
-    async def _set_group_enabled(self, group_id: str, enabled: bool) -> None:
+        # 兼容 0.1.x 的 {group_id: bool} 六爻开关。
+        if method == METHOD_LIUYAO:
+            legacy = await self.get_kv_data(LEGACY_SWITCHES_KEY, {})
+            if isinstance(legacy, dict) and str(group_id) in legacy:
+                return bool(legacy[str(group_id)])
+        return self._default_enabled(method)
+
+    async def _set_method_enabled(
+        self,
+        group_id: str,
+        method: str,
+        enabled: bool,
+    ) -> None:
         async with self._switch_lock:
-            switches = await self.get_kv_data(SWITCHES_KEY, {})
+            switches = await self.get_kv_data(METHOD_SWITCHES_KEY, {})
             if not isinstance(switches, dict):
                 switches = {}
             updated = dict(switches)
-            updated[str(group_id)] = bool(enabled)
-            await self.put_kv_data(SWITCHES_KEY, updated)
+            current = updated.get(str(group_id))
+            group_switches = dict(current) if isinstance(current, dict) else {}
+            group_switches[method] = bool(enabled)
+            updated[str(group_id)] = group_switches
+            await self.put_kv_data(METHOD_SWITCHES_KEY, updated)
 
-    async def _is_group_owner(self, event: AstrMessageEvent) -> bool:
+    async def _is_group_operator(self, event: AstrMessageEvent) -> bool:
+        allowed_roles = {"owner", "admin"}
         raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
         sender = self._raw_get(raw, "sender")
         role = str(
@@ -269,12 +408,16 @@ class LiuyaoPlugin(Star):
             or self._raw_get(raw, "role")
             or ""
         ).lower()
-        if role == "owner":
+        if role in allowed_roles:
             return True
         if role:
             return False
 
-        if not bool(self._config_get("allow_owner_api_lookup", True)):
+        allow_lookup = self._config_get(
+            "allow_operator_api_lookup",
+            self._config_get("allow_owner_api_lookup", True),
+        )
+        if not bool(allow_lookup):
             return False
         client = getattr(event, "bot", None)
         call_action = getattr(client, "call_action", None)
@@ -290,12 +433,15 @@ class LiuyaoPlugin(Star):
                 no_cache=True,
             )
             data = self._raw_get(result, "data") or result
-            return str(self._raw_get(data, "role") or "").lower() == "owner"
+            return str(self._raw_get(data, "role") or "").lower() in allowed_roles
         except Exception as exc:
-            logger.warning(f"liuyao：查询群主身份失败：{exc}")
+            logger.warning(f"liuyao：查询群主/管理员身份失败：{exc}")
             return False
 
-    def _default_enabled(self) -> bool:
+    def _default_enabled(self, method: str) -> bool:
+        method_defaults = self._config_get("method_defaults", {})
+        if isinstance(method_defaults, dict) and method in method_defaults:
+            return bool(method_defaults[method])
         return bool(self._config_get("default_enabled", False))
 
     def _show_disclaimer(self) -> bool:
@@ -337,3 +483,7 @@ class LiuyaoPlugin(Star):
 
     async def terminate(self):
         logger.info("liuyao 插件已卸载")
+
+
+
+

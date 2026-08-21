@@ -81,6 +81,12 @@ def test_corpus_is_complete_and_binary_mapping_is_consistent() -> None:
 
     assert "潛龍" in corpus.get(1)["lines"][0]
     assert "履霜" in corpus.get(2)["lines"][0]
+    assert corpus.resolve("乾")["number"] == 1
+    assert corpus.resolve("乾为天")["number"] == 1
+    assert corpus.resolve("第1卦")["number"] == 1
+    assert corpus.resolve("䷀")["number"] == 1
+    assert corpus.resolve("天风姤")["number"] == 44
+    assert corpus.resolve("兌为泽")["number"] == 58
 
 
 def test_reading_contains_primary_changed_and_agent_constraints() -> None:
@@ -97,3 +103,4 @@ def test_reading_contains_primary_changed_and_agent_constraints() -> None:
     assert "之卦" in text
     assert "動爻" in text or "动爻" in text
     assert "不要杜撰古籍原句" in text
+

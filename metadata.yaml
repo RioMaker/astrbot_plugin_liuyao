@@ -1,8 +1,8 @@
 name: astrbot_plugin_liuyao
-display_name: 六爻问卦
-short_desc: QQ 群六爻即时/手动起卦，内置《周易》卦爻辞并支持 Agent 直接调用。
-desc: 面向 QQ 群的六爻问卦插件，提供即时天机、手动铜币、群主开关、古籍原文查询和 Agent Tool。
-version: "0.1.0"
+display_name: 六爻起卦
+short_desc: 支持 /六爻 <问卦内容> 与 /起卦 六爻，内置《周易》卦爻辞并支持 Agent 调用。
+desc: 面向 QQ 群的六爻插件，提供即时天机、手动铜币或卦名起卦、分术数群开关、古籍原文查询和 Agent Tool。
+version: "0.2.1"
 author: Rio
 repo: "https://github.com/RioMaker/astrbot_plugin_liuyao"
 astrbot_version: ">=4.9.2"
@@ -13,3 +13,4 @@ tags:
   - liuyao
   - iching
   - agent-tool
+

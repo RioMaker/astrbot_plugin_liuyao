@@ -1,14 +1,14 @@
 {
   "default_enabled": {
     "type": "bool",
-    "description": "新群默认开启",
-    "hint": "建议保持关闭，由每个 QQ 群群主使用 /问卦 开关 开 来启用。",
+    "description": "各术数在新群中的默认状态",
+    "hint": "建议保持关闭。当前只有六爻；群主或群管理员可使用 /六爻 开 启用。",
     "default": false
   },
-  "allow_owner_api_lookup": {
+  "allow_operator_api_lookup": {
     "type": "bool",
     "description": "缺少原始角色字段时查询群成员资料",
-    "hint": "仅调用 OneBot get_group_member_info 读取身份，不执行管理操作。",
+    "hint": "仅调用 OneBot get_group_member_info 读取群主/群管理员身份，不执行管理操作。",
     "default": true
   },
   "max_question_length": {
