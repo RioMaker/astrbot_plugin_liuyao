@@ -17,6 +17,30 @@
     "hint": "超出部分会被截断，允许范围 20-1000。",
     "default": 200
   },
+  "case_library_enabled": {
+    "type": "bool",
+    "description": "启用六爻卦例库",
+    "hint": "Agent 起卦时自动保存排盘与最终分析，并允许后续补录用户反馈。",
+    "default": true
+  },
+  "case_library_max_records": {
+    "type": "int",
+    "description": "卦例库最多保留记录数",
+    "hint": "全插件最多保留 20-5000 条，默认 500；超过后按时间淘汰最旧记录。",
+    "default": 500
+  },
+  "case_reference_limit": {
+    "type": "int",
+    "description": "每次起卦参考的历史卦例数",
+    "hint": "允许范围 1-5，优先选择同方向、同卦象、问题相近且已有反馈的卦例。",
+    "default": 3
+  },
+  "case_library_cross_group": {
+    "type": "bool",
+    "description": "允许跨群参考匿名卦例",
+    "hint": "默认关闭以隔离各群问题和反馈；开启后只向 Agent 返回不含起卦人身份的卦例摘要。",
+    "default": false
+  },
   "agent_send_chart_image": {
     "type": "bool",
     "description": "Agent 起卦时先发送六爻信息图",

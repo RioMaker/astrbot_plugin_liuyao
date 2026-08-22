@@ -1,11 +1,11 @@
 name: astrbot_plugin_liuyao
 display_name: 六爻起卦
-short_desc: 支持六爻、六亲和 Agent 署名短评排盘图，内置《周易》卦爻辞。
-desc: 面向 QQ 群的六爻插件，提供即时与手动起卦、纳甲六亲、分术数群开关、Agent 补方向与署名短评排盘图、古籍原文查询。
-version: "0.5.1"
+short_desc: 支持六爻、六亲、直断约束和反馈卦例库，内置《周易》卦爻辞。
+desc: 面向 QQ 群的六爻插件，提供即时与手动起卦、纳甲六亲、Agent 排盘图、古籍原文查询，以及自动保存分析和用户反馈的卦例库。
+version: "0.6.0"
 author: Rio
 repo: "https://github.com/RioMaker/astrbot_plugin_liuyao"
-astrbot_version: ">=4.9.2"
+astrbot_version: ">=4.24.0"
 support_platforms:
   - aiocqhttp
 tags:

@@ -26,6 +26,7 @@ class _Star:
 class _Filter:
     command = staticmethod(_identity_decorator)
     llm_tool = staticmethod(_identity_decorator)
+    on_agent_done = staticmethod(_identity_decorator)
 
 
 class _Logger:
@@ -104,12 +105,19 @@ def _make_enabled_plugin() -> LiuyaoPlugin:
         ROOT / "data" / "intents.json",
     )
 
+    store = {"method_switches": {"10001": {"liuyao": True}}}
+
     async def get_data(key, default=None):
-        if key == "method_switches":
-            return {"10001": {"liuyao": True}}
-        return default
+        return store.get(key, default)
+
+    async def put_data(key, value):
+        store[key] = value
 
     plugin.get_kv_data = get_data
+    plugin.put_kv_data = put_data
+    plugin._case_lock = asyncio.Lock()
+    plugin._pending_agent_cases = {}
+    plugin._test_store = store
     return plugin
 
 
@@ -206,6 +214,9 @@ def test_source_registers_flat_commands_and_agent_tools() -> None:
     assert "command_group" not in source
     assert '@filter.llm_tool(name="cast_liuyao")' in source
     assert '@filter.llm_tool(name="lookup_zhouyi_text")' in source
+    assert '@filter.llm_tool(name="search_liuyao_cases")' in source
+    assert '@filter.llm_tool(name="record_liuyao_feedback")' in source
+    assert '@filter.on_agent_done()' in source
     assert "QQ 群主、QQ 群管理员或 AstrBot 管理员" in source
     compile(source, str(ROOT / "main.py"), "exec")
 
@@ -327,10 +338,61 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     assert "卦象信息图：已在工具返回前发送到当前会话" in result
     assert "图卡补全：当前会话模型已补全方向并生成短评（事业）" in result
     assert "AI短评：可可子：先核实机会与成本，再择稳妥时点推进。" in result
+    assert "本次卦例编号：LY-" in result
+    assert "Agent 最终回复完成后将自动写入分析与断语" in result
     assert "本卦六亲（初爻→上爻）" in result
-    assert "不要复述本卦、之卦、动爻、六亲" in result
+    assert "不要机械复述排盘清单" in result
+    assert "不得把正反两面并列后不给结论" in result
     assert "断语：" in result
     assert "不附加与卦义无关的固定套话" in result
+
+    cases = plugin._test_store["liuyao_case_library"]["cases"]
+    assert len(cases) == 1
+    case_id = cases[0]["id"]
+    final_analysis = (
+        "结论：此事能成，但要先过成本关。\n"
+        "以动爻和之卦看，主证强于反证。\n"
+        "断语：三个月内先难后成。"
+    )
+    asyncio.run(
+        plugin.capture_liuyao_agent_analysis(
+            event,
+            object(),
+            types.SimpleNamespace(completion_text=final_analysis),
+        )
+    )
+    saved_case = plugin._test_store["liuyao_case_library"]["cases"][0]
+    assert saved_case["id"] == case_id
+    assert saved_case["analysis"] == final_analysis
+    assert saved_case["verdict"] == "三个月内先难后成。"
+    assert saved_case["status"] == "analyzed"
+
+    feedback_result = asyncio.run(
+        plugin.record_liuyao_feedback_tool(
+            event,
+            feedback="两个月后拿到了新 offer，薪资也达到预期。",
+            case_id=case_id,
+            outcome="应验",
+        )
+    )
+    assert feedback_result == f"已将反馈写入卦例 {case_id}（应验）。"
+    saved_case = plugin._test_store["liuyao_case_library"]["cases"][0]
+    assert saved_case["feedback"][0]["outcome"] == "应验"
+    assert "新 offer" in saved_case["feedback"][0]["text"]
+
+    search_result = asyncio.run(
+        plugin.search_liuyao_cases_tool(
+            event,
+            query="换工作 offer",
+            intent="事业",
+            limit=3,
+        )
+    )
+    assert f"卦例 {case_id}" in search_result
+    assert "卦爻据：" in search_result
+    assert "三个月内先难后成" in search_result
+    assert "应验—两个月后拿到了新 offer" in search_result
+
 
 def test_plain_command_sends_local_chart_without_duplicate_text(tmp_path) -> None:
     class FakeRenderer:

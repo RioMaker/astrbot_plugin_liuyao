@@ -15,10 +15,15 @@ def test_configuration_and_metadata_contract() -> None:
     assert config["agent_generate_chart_comment"]["default"] is True
     assert config["agent_display_name"]["default"] == "AI助手"
     assert config["agent_comment_timeout_seconds"]["default"] == 45
+    assert config["case_library_enabled"]["default"] is True
+    assert config["case_library_max_records"]["default"] == 500
+    assert config["case_reference_limit"]["default"] == 3
+    assert config["case_library_cross_group"]["default"] is False
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert "version: \"0.5.1\"" in metadata
+    assert "version: \"0.6.0\"" in metadata
+    assert "astrbot_version: \">=4.24.0\"" in metadata
     assert "aiocqhttp" in metadata
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert "Pillow>=10.0.0" in requirements

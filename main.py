@@ -14,6 +14,8 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
 if __package__:
+    from .case_library import format_case_references, search_cases
+    from .case_store import LiuyaoCaseStoreMixin
     from .corpus import CorpusError, ZhouyiCorpus
     from .divination import (
         CastResult,
@@ -26,6 +28,8 @@ if __package__:
     from .reading import ReadingService
     from .renderer import ChartRenderError, LiuyaoImageRenderer
 else:  # pragma: no cover - direct local execution
+    from case_library import format_case_references, search_cases
+    from case_store import LiuyaoCaseStoreMixin
     from corpus import CorpusError, ZhouyiCorpus
     from divination import (
         CastResult,
@@ -41,8 +45,8 @@ else:  # pragma: no cover - direct local execution
 
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
-PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、分术数群开关与 Agent Tool"
-PLUGIN_VERSION = "0.5.1"
+PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
+PLUGIN_VERSION = "0.6.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -80,6 +84,7 @@ HELP_TEXT = """六爻起卦插件
 
 方向：综合、事业、感情、财富、学业、健康、家庭、出行。
 普通起卦指令会先发送详细排盘图；也可直接对 Agent 说“为我起一卦”，由 Agent 补全方向和署名短评。
+Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情结果时，Agent 可续写为带实证的卦例。
 六爻承古法以察时变，解读以卦象、爻辞、六亲与所问为据。"""
 
 
@@ -90,7 +95,7 @@ HELP_TEXT = """六爻起卦插件
     PLUGIN_VERSION,
     PLUGIN_REPO,
 )
-class LiuyaoPlugin(Star):
+class LiuyaoPlugin(LiuyaoCaseStoreMixin, Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.context = context
@@ -110,6 +115,8 @@ class LiuyaoPlugin(Star):
             self.renderer = None
             logger.warning(f"liuyao：信息图渲染器不可用：{exc}")
         self._switch_lock = asyncio.Lock()
+        self._case_lock = asyncio.Lock()
+        self._pending_agent_cases: dict[str, list[str]] = {}
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
 
     # ------------------------------------------------------------------
@@ -231,18 +238,28 @@ class LiuyaoPlugin(Star):
             method=method,
             for_agent=True,
         )
+        case_id, case_references, case_status = await self._open_agent_case(
+            event,
+            cast,
+            intent=enriched_intent,
+            question=limited_question,
+            method=method,
+            cast_at=cast_at,
+        )
         chart_sent = chart_status.startswith("已在工具返回前发送")
         if chart_sent:
             final_requirement = (
-                "排盘图已成功发送；不要复述本卦、之卦、动爻、六亲、方式等"
-                "图中已有信息，直接围绕用户所问解卦并给出明确建议，最后另起"
-                "一行以“断语：”写一句简练结论；不附加与卦义无关的固定套话。"
+                "排盘图已成功发送；不要机械复述排盘清单，但要引用关键卦辞或"
+                "爻辞并结合六亲说明依据。先明确断成败、吉凶或去留，再辨主证"
+                "与反证并作取舍，不得把正反两面并列后不给结论。最后另起一行"
+                "以“断语：”写一句可核验的直断；不附加无关固定套话。"
             )
         else:
             final_requirement = (
                 "排盘图未能发送；先简要列出本卦、之卦、动爻和六亲，再围绕"
-                "用户所问解卦，最后另起一行以“断语：”写一句简练结论；"
-                "不附加与卦义无关的固定套话。"
+                "用户所问先下明确判断，再以卦爻辞、六亲及变化趋势逐条论证；"
+                "不得把正反两面并列后不给结论。最后另起一行以“断语：”写一句"
+                "可核验的直断；不附加无关固定套话。"
             )
         caster_name, caster_id = self._caster_identity(event)
         return (
@@ -252,6 +269,9 @@ class LiuyaoPlugin(Star):
             f"图卡补全：{enrichment_status}\n"
             f"AI短评：{display_agent_name}：{ai_comment}\n"
             f"卦象信息图：{chart_status}\n"
+            f"本次卦例编号：{case_id or '未创建'}\n"
+            f"历史卦例参考：{case_references or '本群暂无相关已存卦例。'}\n"
+            f"卦例留档：{case_status}\n"
             f"Agent最终回复要求：{final_requirement}"
         )
 
@@ -275,6 +295,108 @@ class LiuyaoPlugin(Star):
             return self.corpus.lookup_text(int(hexagram), int(line))
         except (CorpusError, TypeError, ValueError) as exc:
             return f"查询参数错误：{exc}"
+
+    @filter.llm_tool(name="search_liuyao_cases")
+    async def search_liuyao_cases_tool(
+        self,
+        event: AstrMessageEvent,
+        query: str = "",
+        intent: str = "",
+        hexagram: int = 0,
+        limit: int = 3,
+    ) -> str:
+        """检索当前群的历史六爻卦例；断新卦前或用户提到旧事进展时应主动调用。
+
+        Args:
+            query(string): 当前问题、旧事关键词或用户反馈原文
+            intent(string): 事业、感情、财富等方向，可留空
+            hexagram(number): 已知本卦的文王卦序，不知道时填 0
+            limit(number): 返回数量，1 到 10，通常使用 3
+        """
+        error = await self._group_gate(event, METHOD_LIUYAO)
+        if error:
+            return error
+        try:
+            hexagram_number = max(0, int(hexagram or 0))
+            result_limit = max(1, min(int(limit or 3), 10))
+        except (TypeError, ValueError):
+            return "hexagram 和 limit 必须是数字。"
+        cases = await self._load_case_records()
+        group_id = str(event.get_group_id() or "").strip()
+        caster_id = str(event.get_sender_id() or "").strip()
+        intent_key = self.readings.normalize_intent(intent) if intent else ""
+        matches = search_cases(
+            cases,
+            group_id=group_id,
+            query=self._clean_case_text(query, 500),
+            intent=intent_key,
+            primary_number=hexagram_number,
+            caster_id=caster_id,
+            limit=result_limit,
+            cross_group=bool(
+                self._config_get("case_library_cross_group", False)
+            ),
+        )
+        if not matches:
+            return "当前卦例库没有找到相关记录。"
+        return (
+            "找到以下历史卦例。只把已经记录的原断和反馈作为经验旁证，"
+            "仍须以当前卦象、动爻和所问为主：\n"
+            + format_case_references(matches)
+        )
+
+    @filter.llm_tool(name="record_liuyao_feedback")
+    async def record_liuyao_feedback_tool(
+        self,
+        event: AstrMessageEvent,
+        feedback: str,
+        case_id: str = "",
+        outcome: str = "未分类",
+    ) -> str:
+        """用户反馈旧占的实际进展或结果时，将反馈追加到原卦例；此时必须调用。
+
+        Args:
+            feedback(string): 用户对事情进展、应验情况或最终结果的原话摘要
+            case_id(string): 对应编号；不知道时先检索，可留空匹配本人最近一例
+            outcome(string): 应验、部分应验、未应验、进行中或未分类
+        """
+        error = await self._group_gate(event, METHOD_LIUYAO)
+        if error:
+            return error
+        cleaned = self._clean_case_text(feedback, 1000)
+        if not cleaned:
+            return "反馈内容不能为空。"
+        return await self._append_case_feedback(
+            event,
+            case_id=self._clean_case_text(case_id, 64),
+            feedback=cleaned,
+            outcome=self._normalize_case_outcome(outcome),
+        )
+
+    @filter.on_agent_done()
+    async def capture_liuyao_agent_analysis(
+        self,
+        event: AstrMessageEvent,
+        run_context: Any,
+        resp: Any,
+    ) -> None:
+        """Persist the final Agent interpretation for a cast made in this run."""
+        del run_context
+        pending = getattr(self, "_pending_agent_cases", {})
+        case_ids = pending.pop(self._agent_run_key(event), [])
+        if isinstance(case_ids, str):
+            case_ids = [case_ids]
+        if not case_ids:
+            return
+        analysis = self._clean_case_text(
+            str(getattr(resp, "completion_text", "") or ""),
+            8000,
+        )
+        if not analysis:
+            logger.warning("liuyao：本轮卦例未取得 Agent 最终分析：%s", case_ids)
+            return
+        for case_id in case_ids:
+            await self._save_case_analysis(event, case_id, analysis)
 
     async def _enrich_agent_chart(
         self,
@@ -426,7 +548,8 @@ class LiuyaoPlugin(Star):
             "只输出一个JSON对象，不要Markdown，不要解释："
             '{"intent":"事业","comment":"一句简短评语"}。'
             "comment控制在16至48个汉字，不带Agent姓名前缀；"
-            "短评只写卦义判断与建议，不附加其他固定套话；不杜撰古籍原文。"
+            "短评先给明确倾向再写一句建议，不得写正反两可的两面话；"
+            "不附加其他固定套话，不杜撰古籍原文。"
         )
 
     def _parse_chart_enrichment(

@@ -103,6 +103,9 @@ def test_reading_contains_primary_changed_and_agent_constraints() -> None:
     assert "之卦" in text
     assert "動爻" in text or "动爻" in text
     assert "不要杜撰古籍原句" in text
+    assert "先断后证" in text
+    assert "以主证定结论" in text
+    assert "不得用“既可能……也可能……”逃避取舍" in text
     assert "断语：" in text
     assert "不替代" not in text
 

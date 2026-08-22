@@ -14,7 +14,7 @@
 - 意图方向：综合、事业、感情、财富、学业、健康、家庭、出行。
 - 分术数开关：保存结构为“群 → 术数 → 状态”；当前只有六爻，后续增加其他术数不会共用同一个开关。
 - 权限：QQ 群主、QQ 群管理员和 AstrBot 管理员都可以设置本群术数开关。
-- Agent 调用：`cast_liuyao` 成卦后让当前会话模型补全缺失方向并生成署名短评，再先发送含六亲的排盘图；另提供 `lookup_zhouyi_text` 查询工具。
+- Agent 调用：成卦后先发含六亲的排盘图，按“先断后证”规则直断；自动保存问题、排盘、AI 分析和断语，并可检索历史卦例、补录用户反馈。
 
 ## 指令
 
@@ -85,33 +85,49 @@
 
 用户可以直接说“为我起一卦问事业”，也可以不写方向说“为我起一卦看看最近的工作变化”。Agent 可调用：
 
-- `cast_liuyao(mode, intent, question, manual_lines, agent_name)`：即时起卦，或在 manual 模式传入六爻结果/卦名；Agent 应把自身人格名（如“可可子”）传入 `agent_name`。
-- `lookup_zhouyi_text(hexagram, line)`：按文王卦序查询卦辞或某一爻原文。
+- `cast_liuyao(mode, intent, question, manual_lines, agent_name)`：即时或手动起卦；自动建档并返回相关历史卦例。
+- `lookup_zhouyi_text(hexagram, line)`：按文王卦序核对卦辞或某一爻原文。
+- `search_liuyao_cases(query, intent, hexagram, limit)`：断新卦前或用户提到旧事时检索相关卦例。
+- `record_liuyao_feedback(feedback, case_id, outcome)`：用户反馈旧占进展或结果时，追加应验、部分应验、未应验或进行中记录。
 
 `cast_liuyao` 的执行顺序固定为：
 
-1. 完成起卦，先取得本卦、之卦、卦宫及纳甲六亲；
-2. 调用当前会话模型，根据已经生成的卦象写一条简短评语；用户没说方向时，同时从问题中补全方向；
-3. 用 Agent 传入的自称署名，例如 `可可子：先核实机会与成本，再择稳妥时点推进。`；
-4. 生成本地 PNG，并在 Tool 返回前主动发送到当前 QQ 群；
-5. 将完整卦象、六亲、卦爻辞和回复约束返回给 Agent；
-6. 排盘图成功时，Agent 不复述图中排盘，直接围绕所问解卦并以单独一行“断语：……”收尾；图片失败时才在文字中补列卦象。
+1. 完成起卦，取得本卦、之卦、动爻原文、卦宫及纳甲六亲；
+2. 调用当前会话模型生成署名短评；用户没说方向时，同时从问题中补全方向；
+3. 生成本地 PNG，并在 Tool 返回前主动发送到当前 QQ 群；
+4. 从卦例库检索同方向、同卦象、问题相近且已有反馈的记录；
+5. 保存本次问题、排盘、起卦时间与卦例编号；
+6. 将完整卦爻辞、六亲、相关卦例和直断约束返回 Agent；
+7. Agent 先明确断成败、吉凶或去留，再按本卦、关键动爻、该爻六亲、之卦趋势列主证与反证并作取舍，禁止正反并列却不下结论；
+8. Agent 完成回复后，`on_agent_done` 自动把分析全文及“断语：……”写回本次卦例。
 
 排盘图包含起卦人群昵称、QQ、群号、日期时间、问卦方向、问题、本卦、之卦、卦宫五行、每爻六亲与纳甲地支、六爻阴阳、动爻、AI 署名短评、卦辞和相关动爻辞。变卦六亲按传统规则沿用本卦卦宫五行。
 
 短评调用超时、模型输出异常或图片发送失败时都会自动回退，不阻断完整文字卦象和 Agent 回答。启用 AI 短评会额外产生一次较短的当前模型调用。
 
-工具只在已启用六爻的 QQ 群内工作。普通指令在排盘图发送成功后不再追加文字，只有图片失败时才返回完整文字卦象；通过 Agent 使用时，由当前 Agent 直接解卦并以断语收尾。
+工具只在已启用六爻的 QQ 群内工作。普通指令在排盘图发送成功后不再追加文字；通过 Agent 使用时，Agent 必须引用关键卦爻辞、结合六亲作主次判断，并以可供后续反馈核验的断语收尾。
+
+## 卦例库
+
+卦例使用 AstrBot 插件 KV 持久化，记录问题、方向、本卦与之卦、六个爻值、动爻原文、卦宫六亲、AI 分析、最终断语及后续反馈。每次 Agent 起卦都会自动建档；Agent 最终回复完成后自动补齐分析，不依赖模型再次调用保存工具。
+
+用户日后提到原事情的进展或结果时，Agent 应先用 `search_liuyao_cases` 确认对应卦例，再调用 `record_liuyao_feedback`。不知道编号时，反馈工具可匹配该用户在本群最近的一例。反馈只允许当前用户更新自己在当前群的卦例。
+
+历史参考默认严格按群隔离。若开启 `case_library_cross_group`，检索可参考其他群卦例，但返回给 Agent 的摘要不包含起卦人昵称、QQ 或群号。已有实际反馈的卦例会获得更高相关度，但当前卦象始终是主要依据。
 
 ## 安装与配置
 
-把本目录放入 AstrBot 的 `data/plugins/`，在 WebUI 重载插件。最低 AstrBot 版本为 4.9.2；运行时依赖 Pillow，AstrBot 会根据 `requirements.txt` 安装。插件已内置 Noto Sans CJK SC 字体，因此 Linux/Docker 宿主机无需另外安装中文字体；字体按 SIL Open Font License 1.1 分发，许可证见 `assets/fonts/LICENSE.txt`。
+把本目录放入 AstrBot 的 `data/plugins/`，在 WebUI 重载插件。最低 AstrBot 版本为 4.24.0；运行时依赖 Pillow，AstrBot 会根据 `requirements.txt` 安装。插件已内置 Noto Sans CJK SC 字体，因此 Linux/Docker 宿主机无需另外安装中文字体；字体按 SIL Open Font License 1.1 分发，许可证见 `assets/fonts/LICENSE.txt`。
 
 配置项：
 
 - `default_enabled`：各术数在新群中的默认状态，建议保持 `false`。
 - `allow_operator_api_lookup`：原始事件缺少 `sender.role` 时，读取 OneBot 群成员资料核验群主/群管理员。
 - `max_question_length`：问题最大长度。
+- `case_library_enabled`：是否自动保存 Agent 六爻卦例，默认 `true`。
+- `case_library_max_records`：全插件卦例上限，范围 20–5000，默认 500。
+- `case_reference_limit`：每次起卦最多返回的相关卦例数，范围 1–5，默认 3。
+- `case_library_cross_group`：是否允许匿名跨群参考，默认 `false`。
 - `agent_send_chart_image`：Agent 起卦时是否先发送排盘图，默认为 `true`。
 - `command_send_chart_image`：普通六爻指令是否先发送排盘图，默认为 `true`。
 - `agent_generate_chart_comment`：是否使用当前会话模型生成图中短评并补全缺失方向，默认为 `true`。
