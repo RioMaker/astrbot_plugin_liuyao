@@ -101,9 +101,10 @@ class LiuyaoImageRenderer:
             fonts["body"],
             WIDTH - 2 * MARGIN - 48,
         )
+        clean_comment = str(ai_comment or "").replace("\x00", "").strip()
         comment_text = (
             f"{self._clean(agent_name) or 'AI助手'}："
-            f"{self._clean(ai_comment) or '卦象已成，当察动静、辨时位而取其宜。'}"
+            f"{clean_comment or '卦象已成，当察动静、辨时位而取其宜。'}"
         )
         comment_lines = self._wrap(
             measure,
@@ -574,8 +575,6 @@ class LiuyaoImageRenderer:
     @staticmethod
     def _clean(value: str) -> str:
         return " ".join(str(value or "").replace("\x00", "").split())
-
-
 
 
 

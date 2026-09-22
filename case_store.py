@@ -46,6 +46,7 @@ class LiuyaoCaseStoreMixin:
         question: str,
         method: str,
         cast_at: datetime,
+        track_agent: bool = True,
     ) -> tuple[str, str, str]:
         if not bool(self._config_get("case_library_enabled", True)):
             return "", "", "卦例库已由配置关闭。"
@@ -58,7 +59,8 @@ class LiuyaoCaseStoreMixin:
         caster_name, caster_id = self._caster_identity(event)
         try:
             async with self._case_lock_instance():
-                cases = normalize_case_store(await get_data(LIUYAO_CASES_KEY, {}))
+                payload = await get_data(LIUYAO_CASES_KEY, {})
+                cases = normalize_case_store(payload)
                 references = search_cases(
                     cases,
                     group_id=group_id,
@@ -85,14 +87,17 @@ class LiuyaoCaseStoreMixin:
                     caster_name=caster_name,
                     caster_id=caster_id,
                 )
+                case["serial"] = serialize_case_store(cases, payload)["next_serial"]
                 cases.append(case)
                 maximum = self._bounded_config_int(
                     "case_library_max_records", 500, 20, 5000
                 )
                 await put_data(
                     LIUYAO_CASES_KEY,
-                    serialize_case_store(trim_cases(cases, maximum)),
+                    serialize_case_store(trim_cases(cases, maximum), payload),
                 )
+            if not track_agent:
+                return str(case["id"]), format_case_references(references), "排盘已保存。"
             pending = getattr(self, "_pending_agent_cases", None)
             if not isinstance(pending, dict):
                 pending = {}
@@ -136,7 +141,7 @@ class LiuyaoCaseStoreMixin:
         intent_key = self.readings.normalize_intent(intent)
         timestamp = cast_at.isoformat()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "id": f"LY-{cast_at.strftime('%Y%m%d')}-{uuid4().hex[:8]}",
             "created_at": timestamp,
             "updated_at": timestamp,
@@ -176,6 +181,7 @@ class LiuyaoCaseStoreMixin:
                 ],
             },
             "analysis": "",
+            "answer": "",
             "verdict": "",
             "feedback": [],
             "status": "awaiting_analysis",
@@ -194,7 +200,8 @@ class LiuyaoCaseStoreMixin:
         group_id = str(event.get_group_id() or "").strip()
         try:
             async with self._case_lock_instance():
-                cases = normalize_case_store(await get_data(LIUYAO_CASES_KEY, {}))
+                payload = await get_data(LIUYAO_CASES_KEY, {})
+                cases = normalize_case_store(payload)
                 matched = False
                 for case in cases:
                     if (
@@ -204,13 +211,13 @@ class LiuyaoCaseStoreMixin:
                         case["analysis"] = analysis
                         case["verdict"] = extract_verdict(analysis)
                         case["updated_at"] = datetime.now().astimezone().isoformat()
-                        case["status"] = "analyzed"
+                        case["status"] = "feedback_recorded" if case.get("feedback") else "analyzed"
                         matched = True
                         break
                 if not matched:
                     logger.warning("liuyao：待写入分析的卦例不存在：%s", case_id)
                     return
-                await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases))
+                await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases, payload))
             logger.info("liuyao：已自动保存卦例分析 %s", case_id)
         except Exception as exc:
             logger.exception(
@@ -224,6 +231,8 @@ class LiuyaoCaseStoreMixin:
         case_id: str,
         feedback: str,
         outcome: str,
+        answer: str = "",
+        shefu_only: bool = False,
     ) -> str:
         if not bool(self._config_get("case_library_enabled", True)):
             return "卦例库已由配置关闭。"
@@ -235,19 +244,27 @@ class LiuyaoCaseStoreMixin:
         caster_id = str(event.get_sender_id() or "").strip()
         try:
             async with self._case_lock_instance():
-                cases = normalize_case_store(await get_data(LIUYAO_CASES_KEY, {}))
+                payload = await get_data(LIUYAO_CASES_KEY, {})
+                cases = normalize_case_store(payload)
                 eligible = [
                     case
                     for case in cases
                     if str(case.get("group_id") or "") == group_id
                     and str(case.get("caster_id") or "") == caster_id
+                    and (not shefu_only or case.get("intent") == "shefu")
                 ]
                 if case_id:
                     eligible = [
                         case
                         for case in eligible
                         if str(case.get("id") or "").lower() == case_id.lower()
+                        or (case_id.isdigit() and case.get("serial") == int(case_id))
                     ]
+                elif shefu_only:
+                    eligible = [case for case in eligible if not case.get("answer")]
+                    if len(eligible) > 1:
+                        numbers = "、".join(f"{case['serial']:03d}" for case in eligible)
+                        return f"存在多条待揭晓射覆卦例（{numbers}），请发送：射覆答案 编号 物品。"
                 if not eligible:
                     return "未找到当前用户在本群可更新的对应卦例。"
                 case = max(
@@ -259,18 +276,27 @@ class LiuyaoCaseStoreMixin:
                     for item in case.get("feedback", [])
                     if isinstance(item, dict)
                 ]
+                if any(item.get("text") == feedback and item.get("answer", "") == answer
+                       for item in feedback_rows):
+                    return f"卦例 {case['serial']:03d} 已记录该反馈。"
                 observed_at = datetime.now().astimezone().isoformat()
                 feedback_rows.append(
                     {
                         "observed_at": observed_at,
                         "outcome": outcome,
                         "text": feedback,
+                        "answer": answer,
+                        "reporter_id": caster_id,
                     }
                 )
                 case["feedback"] = feedback_rows[-20:]
+                if answer and case.get("intent") == "shefu":
+                    case["answer"] = answer
                 case["updated_at"] = observed_at
                 case["status"] = "feedback_recorded"
-                await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases))
+                await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases, payload))
+            if answer and case.get("intent") == "shefu":
+                return f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。"
             return f"已将反馈写入卦例 {case['id']}（{outcome}）。"
         except Exception as exc:
             logger.exception(

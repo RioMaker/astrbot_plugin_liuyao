@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "directions": {
+    "shefu": {
+      "label": "射覆",
+      "aliases": ["猜物", "猜物品", "shefu"],
+      "focus": ["颜色", "材质", "软硬", "形状与大小", "用途", "关联场景", "候选物品"]
+    },
     "general": {
       "label": "综合",
       "aliases": ["总体", "运势", "综合运势"],

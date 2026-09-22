@@ -24,6 +24,8 @@ class _Star:
 
 
 class _Filter:
+    EventMessageType = types.SimpleNamespace(GROUP_MESSAGE="group")
+    event_message_type = staticmethod(_identity_decorator)
     command = staticmethod(_identity_decorator)
     llm_tool = staticmethod(_identity_decorator)
     on_agent_done = staticmethod(_identity_decorator)
@@ -91,6 +93,9 @@ class _Event:
 
     def image_result(self, path):
         return {"image": path}
+
+    def plain_result(self, text):
+        return {"text": text}
 
     async def send(self, message):
         self.sent.append(message)
@@ -486,6 +491,5 @@ def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
     assert "本卦：" in result
     assert "排盘图未能发送" in result
     assert "断语：" in result
-
 
 

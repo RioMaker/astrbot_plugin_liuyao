@@ -41,6 +41,10 @@ HEXAGRAM_MATRIX = (
 )
 
 INTENT_ALIASES = {
+    "射覆": "shefu",
+    "猜物": "shefu",
+    "猜物品": "shefu",
+    "shefu": "shefu",
     "综合": "general",
     "总体": "general",
     "general": "general",

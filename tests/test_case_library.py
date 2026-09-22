@@ -95,6 +95,7 @@ def test_case_store_round_trip_trim_and_verdict_extraction() -> None:
         )
         for index in range(1, 26)
     ]
+    cases = normalize_case_store(cases)
     payload = serialize_case_store(cases)
     assert normalize_case_store(payload) == cases
     assert len(trim_cases(cases, 20)) == 20

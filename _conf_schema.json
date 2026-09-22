@@ -20,7 +20,7 @@
   "case_library_enabled": {
     "type": "bool",
     "description": "启用六爻卦例库",
-    "hint": "Agent 起卦时自动保存排盘与最终分析，并允许后续补录用户反馈。",
+    "hint": "Agent 起卦及射覆指令自动留档；同群出题人明确揭晓射覆答案后自动追加反馈。",
     "default": true
   },
   "case_library_max_records": {
@@ -50,7 +50,7 @@
   "command_send_chart_image": {
     "type": "bool",
     "description": "普通六爻指令发送排盘图",
-    "hint": "默认开启。/六爻、/六爻 即时和/六爻 手动都会先发送排盘图，再返回文字解卦。",
+    "hint": "默认开启。普通指令发图成功不追加文字；射覆图中包含属性分析与候选物品，失败回退文字。",
     "default": true
   },
   "agent_generate_chart_comment": {
@@ -78,6 +78,5 @@
     "default": ""
   }
 }
-
 
 

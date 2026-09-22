@@ -6,7 +6,7 @@ import re
 from typing import Any, Iterable
 
 
-CASE_SCHEMA_VERSION = 1
+CASE_SCHEMA_VERSION = 2
 
 
 def normalize_case_store(payload: Any) -> list[dict[str, Any]]:
@@ -16,11 +16,35 @@ def normalize_case_store(payload: Any) -> list[dict[str, Any]]:
         values = payload
     else:
         values = []
-    return [dict(item) for item in values if isinstance(item, dict) and item.get("id")]
+    if not isinstance(values, list):
+        return []
+    cases = [dict(item) for item in values if isinstance(item, dict) and item.get("id")]
+    used = {_safe_int(case.get("serial")) for case in cases}
+    next_serial = max(
+        max(used, default=0) + 1,
+        _safe_int(payload.get("next_serial")) if isinstance(payload, dict) else 1,
+    )
+    assigned = set()
+    for case in cases:
+        serial = _safe_int(case.get("serial"))
+        if serial <= 0 or serial in assigned:
+            serial = next_serial
+            next_serial += 1
+        case["serial"] = serial
+        assigned.add(serial)
+    return cases
 
 
-def serialize_case_store(cases: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    return {"schema_version": CASE_SCHEMA_VERSION, "cases": list(cases)}
+def serialize_case_store(
+    cases: Iterable[dict[str, Any]], previous: Any = None,
+) -> dict[str, Any]:
+    records = list(cases)
+    next_serial = max(
+        max((_safe_int(c.get("serial")) for c in records), default=0) + 1,
+        _safe_int(previous.get("next_serial")) if isinstance(previous, dict) else 1,
+    )
+    return {"schema_version": CASE_SCHEMA_VERSION, "cases": records,
+            "next_serial": next_serial}
 
 
 def trim_cases(cases: list[dict[str, Any]], maximum: int) -> list[dict[str, Any]]:
@@ -47,6 +71,8 @@ def search_cases(
     for case in cases:
         if not cross_group and str(case.get("group_id") or "") != str(group_id):
             continue
+        if intent == "shefu" and case.get("intent") != "shefu":
+            continue
         score = 0.0
         cast = case.get("cast") if isinstance(case.get("cast"), dict) else {}
         if caster_id and str(case.get("caster_id") or "") == str(caster_id):
@@ -70,6 +96,7 @@ def search_cases(
                 str(case.get("question") or ""),
                 str(case.get("analysis") or ""),
                 str(case.get("verdict") or ""),
+                str(case.get("answer") or ""),
                 " ".join(
                     str(item.get("text") or "")
                     for item in case.get("feedback", [])
@@ -125,6 +152,7 @@ def format_case_references(cases: Iterable[dict[str, Any]]) -> str:
         rows.extend(
             [
                 f"卦例 {case.get('id', '未知')}｜{case.get('created_at', '')}",
+                f"编号：{int(case.get('serial') or 0):03d}；真实答案：{case.get('answer') or '尚未揭晓'}",
                 f"原问：{case.get('question') or '未填写'}",
                 f"方向：{case.get('intent_label') or case.get('intent') or '未分类'}",
                 (
