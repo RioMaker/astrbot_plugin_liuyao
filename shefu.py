@@ -88,19 +88,22 @@ class ShefuMixin:
                     return "本群未找到该编号的卦例。"
                 return await self._case_detail(event, case)
             parts = argument.split()
-            only_shefu = bool(parts and parts[0] == "射覆")
-            if parts and parts[0] not in {"列表", "射覆"}:
-                return "用法：/六爻 卦例 [编号]；翻页：/六爻 卦例 列表 2；射覆库：/六爻 卦例 射覆"
+            category = ""
+            if parts and parts[0] != "列表":
+                category = self._normalize_intent_choice(parts[0], "")
+                if not category:
+                    return "用法：/六爻 卦例 [编号]；翻页：/六爻 卦例 列表 2；分类：/六爻 卦例 射覆|天气|事业等"
             if len(parts) > 2 or (len(parts) == 2 and not parts[1].isdigit()):
                 return "页码必须是正整数，例如 /六爻 卦例 列表 2。"
             page = int(parts[1]) if len(parts) == 2 else 1
-            if only_shefu:
-                cases = [c for c in cases if c.get("intent") == "shefu"]
+            if category:
+                cases = [c for c in cases if c.get("intent") == category]
             cases.sort(key=lambda c: c["serial"], reverse=True)
             pages = max(1, (len(cases) + 19) // 20)
             if not 1 <= page <= pages:
                 return f"页码超出范围，共 {pages} 页。"
-            rows = [f"本群{'射覆' if only_shefu else ''}卦例清单｜{len(cases)} 条｜{page}/{pages} 页"]
+            label = self.readings.directions[category]["label"] if category else ""
+            rows = [f"本群{label}卦例清单｜{len(cases)} 条｜{page}/{pages} 页"]
             for case in cases[(page - 1) * 20:page * 20]:
                 question = self._clean_short_text(case.get("question", ""), 50)
                 answer = self._clean_short_text(case.get("answer", ""), 30)
@@ -109,7 +112,7 @@ class ShefuMixin:
                 )
                 rows.append(f"{case['serial']:03d} [{case.get('intent_label', '综合')}] "
                             f"{question or '未填写问题'}｜{state}")
-            rows.append("详情：/六爻 卦例 001；翻页：/六爻 卦例 列表 2")
+            rows.append(f"详情：/六爻 卦例 001；翻页：/六爻 卦例 {label or '列表'} 2")
             return "\n".join(rows)
         except Exception as exc:
             logger.exception("liuyao：查询卦例失败：%r", exc)

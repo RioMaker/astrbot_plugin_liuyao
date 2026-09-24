@@ -71,7 +71,7 @@ def search_cases(
     for case in cases:
         if not cross_group and str(case.get("group_id") or "") != str(group_id):
             continue
-        if intent == "shefu" and case.get("intent") != "shefu":
+        if intent in {"shefu", "weather"} and case.get("intent") != intent:
             continue
         score = 0.0
         cast = case.get("cast") if isinstance(case.get("cast"), dict) else {}

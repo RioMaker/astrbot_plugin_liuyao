@@ -250,7 +250,7 @@ def test_bare_liuyao_content_casts_instantly() -> None:
     )
     assert "六爻问卦｜纳甲排盘" in result
     assert "方式：即时天机（简捷问卦）" in result
-    assert "意图：综合" in result
+    assert "意图：事业" in result
     assert "所问：今年适合换工作吗" in result
 
 
@@ -491,5 +491,4 @@ def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
     assert "本卦：" in result
     assert "排盘图未能发送" in result
     assert "断语：" in result
-
 

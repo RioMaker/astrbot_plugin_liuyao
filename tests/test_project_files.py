@@ -22,7 +22,7 @@ def test_configuration_and_metadata_contract() -> None:
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert "version: \"0.7.0\"" in metadata
+    assert "version: \"0.8.0\"" in metadata
     assert "astrbot_version: \">=4.24.0\"" in metadata
     assert "aiocqhttp" in metadata
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
@@ -57,6 +57,7 @@ def test_intent_dataset_has_supported_directions_and_curated_examples() -> None:
         "family",
         "travel",
         "shefu",
+        "weather",
     }
     assert len(payload["curated_readings"]) >= 8
 
@@ -67,6 +68,5 @@ def test_documented_sources_and_data_license_exist() -> None:
     assert "维基文库《周易》" in sources
     assert "中国哲学书电子化计划" in sources
     assert "CC BY-SA 4.0" in notice
-
 
 

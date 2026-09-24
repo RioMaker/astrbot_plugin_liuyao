@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "directions": {
+    "weather": {
+      "label": "天气",
+      "aliases": ["天时", "气象", "晴雨", "weather"],
+      "focus": ["地点与时段", "晴雨", "风云与雷电", "动变先后", "依据与缺项", "实况反馈"]
+    },
     "shefu": {
       "label": "射覆",
       "aliases": ["猜物", "猜物品", "shefu"],

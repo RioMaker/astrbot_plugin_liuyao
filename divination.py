@@ -41,6 +41,11 @@ HEXAGRAM_MATRIX = (
 )
 
 INTENT_ALIASES = {
+    "天气": "weather",
+    "天时": "weather",
+    "气象": "weather",
+    "晴雨": "weather",
+    "weather": "weather",
     "射覆": "shefu",
     "猜物": "shefu",
     "猜物品": "shefu",
@@ -191,7 +196,33 @@ def parse_intent_and_question(text: str) -> tuple[str, str]:
     intent = INTENT_ALIASES.get(parts[0].lower())
     if intent:
         return intent, parts[1].strip() if len(parts) == 2 else ""
-    return "general", (text or "").strip()
+    return infer_intent(text), (text or "").strip()
+
+
+def infer_intent(question: str) -> str:
+    """Conservative local routing; never subscribe to additional messages."""
+    text = (question or "").lower()
+    groups = (
+        ("shefu", ("射覆", "猜物", "猜猜是什么", "盒子里是什么", "盒中何物")),
+        # Do not match lone 雨/风/雪: 风雨同舟、风水、雪上加霜 are not weather.
+        ("weather", ("天气", "天氣", "气象", "晴雨", "阴晴",
+                     "下雨", "降雨", "有雨", "会雨", "雨停", "停雨", "止雨", "雨会停",
+                     "何时雨", "何日雨", "几时雨", "转晴", "放晴", "晴天", "天晴",
+                     "晴不晴", "晴吗", "晴否", "会晴", "阴天", "多云", "雨天",
+                     "下雪", "降雪", "雷雨", "雷阵雨", "暴雨", "刮风", "大风",
+                     "台风", "冰雹", "起雾", "霜冻", "气温", "降温", "升温")),
+        ("relationship", ("感情", "恋爱", "婚姻", "对象", "关系", "复合", "姻缘")),
+        ("career", ("事业", "工作", "职场", "项目", "升职", "跳槽", "创业", "换工作")),
+        ("wealth", ("财富", "财运", "收入", "钱", "投资", "生意", "回款")),
+        ("study", ("学业", "学习", "考试", "成绩", "录取", "论文", "考研")),
+        ("health", ("健康", "身体", "病", "康复", "治疗", "睡眠")),
+        ("family", ("家庭", "家人", "父母", "孩子", "家宅", "亲属")),
+        ("travel", ("出行", "旅行", "迁移", "搬家", "远行", "留学", "出差")),
+    )
+    for key, keywords in groups:
+        if any(keyword in text for keyword in keywords):
+            return key
+    return "general"
 
 
 def bits_to_hexagram_number(bits: Sequence[int]) -> int:
