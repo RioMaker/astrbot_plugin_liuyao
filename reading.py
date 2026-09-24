@@ -10,12 +10,12 @@ try:
     from .corpus import ZhouyiCorpus
     from .divination import CastResult, render_diagram
     from .najia import relatives_for_bits
-    from .reference_library import ReferenceLibrary
+    from .reference_library import ReferenceLibrary, StudyReferenceLibrary
 except ImportError:  # pragma: no cover - direct local execution
     from corpus import ZhouyiCorpus
     from divination import CastResult, render_diagram
     from najia import relatives_for_bits
-    from reference_library import ReferenceLibrary
+    from reference_library import ReferenceLibrary, StudyReferenceLibrary
 
 
 class ReadingService:
@@ -27,6 +27,9 @@ class ReadingService:
             raise ValueError("意图方向数据缺少 directions/general")
         self.directions: dict[str, dict[str, Any]] = directions
         self.references = ReferenceLibrary(intent_path.parent / "references", directions)
+        self.study_references = StudyReferenceLibrary(
+            intent_path.parent.parent / "docs" / "study", directions,
+        )
         self.curated: dict[tuple[int, str], dict[str, Any]] = {}
         for item in payload.get("curated_readings", []):
             if isinstance(item, dict):
@@ -165,4 +168,8 @@ class ReadingService:
         return "\n".join(rows)
 
     def reference_context(self, intent: str) -> str:
-        return self.references.render(self.normalize_intent(intent))
+        return self.references.render(self.normalize_intent(intent)) + (
+            "\n\n扩展研读：可调用 lookup_liuyao_reference(topic) 获取任意类型的"
+            "完整学习笔记、三个古籍卦例与出处，不限当前方向；topic 留空返回目录，"
+            "传“基础”读通则，传“来源”核对版本。古例不等于本群已验证反馈。"
+        )

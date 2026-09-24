@@ -23,3 +23,7 @@ SOFTWARE.
 Bundled Zhouyi source text is public-domain classical material. Wikisource page
 arrangement and revision metadata are attributed under CC BY-SA 4.0; see
 docs/DATA_SOURCES.md.
+
+The reference notes under data/references/ and docs/study/ are licensed under
+CC BY-SA 4.0, not the MIT grant above. See their README files and
+docs/study/sources.md for classical sources, digital-text attribution, and scope.

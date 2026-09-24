@@ -1,8 +1,8 @@
 name: astrbot_plugin_liuyao
 display_name: 六爻起卦
-short_desc: 六爻天气与射覆分类研判，内置十类古籍参考，支持卦例归档和管理员查询。
+short_desc: 六爻分类研判，十类学习笔记与三十古籍卦例，Agent 可跨专题查询。
 desc: 面向 QQ 群的六爻插件，提供即时与手动起卦、纳甲六亲、Agent 排盘图、古籍原文查询，以及自动保存分析和用户反馈的卦例库。
-version: "0.8.0"
+version: "0.9.0"
 author: Rio
 repo: "https://github.com/RioMaker/astrbot_plugin_liuyao"
 astrbot_version: ">=4.24.0"

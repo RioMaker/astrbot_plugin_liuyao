@@ -50,7 +50,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "0.9.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -304,6 +304,25 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             f"卦例留档：{case_status}\n"
             f"Agent最终回复要求：{final_requirement}"
         )
+
+    @filter.llm_tool(name="lookup_liuyao_reference")
+    async def lookup_liuyao_reference_tool(
+        self,
+        event: AstrMessageEvent,
+        topic: str = "",
+    ) -> str:
+        """查阅任意类型古籍学习笔记与带出处卦例，可跨方向，不需要先起卦。
+
+        这是公开古籍资料，不是用户历史卦例。需辨取用、动变或比较古例时调用；
+        返回完整正文及来源，不把古例日期和结果当成本次排盘或用户反馈。
+
+        Args:
+            topic(string): 留空返回目录；支持综合、事业、感情、财富、学业、健康、家庭、出行、射覆、天气及英文类别键；基础或来源读取共同笔记和版本记录
+        """
+        error = await self._group_gate(event, METHOD_LIUYAO)
+        if error:
+            return error
+        return self.readings.study_references.lookup(topic)
 
     @filter.llm_tool(name="lookup_zhouyi_text")
     async def lookup_zhouyi_text_tool(
@@ -1143,7 +1162,6 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
 
     async def terminate(self):
         logger.info("liuyao 插件已卸载")
-
 
 
 
