@@ -22,9 +22,9 @@ def test_configuration_and_metadata_contract() -> None:
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert 'version: "0.10.0"' in metadata
+    assert 'version: "0.10.1"' in metadata
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert 'PLUGIN_VERSION = "0.10.0"' in main_source
+    assert 'PLUGIN_VERSION = "0.10.1"' in main_source
     assert '@filter.llm_tool(name="lookup_liuyao_reference")' in main_source
     assert 'astrbot_version: ">=4.24.0"' in metadata
     assert "aiocqhttp" in metadata

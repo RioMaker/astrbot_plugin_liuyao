@@ -31,14 +31,15 @@ class CastPolicyMixin:
                 previous = state.get("last", {})
                 if normalize_question(question) == normalize_question(previous.get("question", "")):
                     return None, (
-                        "同一事情禁止连续起卦。请用 /六爻 解读 或 reuse_liuyao 解读原卦；"
-                        "补充信息、换措辞或更换起卦方式都不应重新起卦。"
+                        "同一事情禁止连续起六爻卦。请用 /六爻 解读 或 reuse_liuyao 解读六爻原卦；"
+                        "补充信息、换措辞或更换六爻起卦方式都不应重起。本限制仅适用于六爻。"
                     )
                 if len(stamps) >= 3:
                     wait = max(1, math.ceil((min(stamps) + 3600 - now) / 60))
                     return (
                         None,
-                        f"每位用户每小时最多起卦 3 次，请约 {wait} 分钟后再试；原卦可继续解读。",
+                        f"六爻：每位用户每小时最多起卦 3 次，请约 {wait} 分钟后再试；"
+                        "六爻原卦可继续解读。",
                     )
                 # Generate only after admission; no await between generating and saving the record.
                 cast = cast if cast is not None else cast_instant()
@@ -73,7 +74,10 @@ class CastPolicyMixin:
                 state = await self.get_kv_data("cast_policy:" + sender, {})
             last = state.get("last", {})
             if not last:
-                return "尚无可复用的原卦，请先明确具体事情再起卦。"
+                return (
+                    "尚无可复用的六爻原卦。五行数字记录不能替代六爻原卦；"
+                    "有具体事情可调用 cast_liuyao 起六爻卦。"
+                )
             if last.get("group_id") != str(event.get_group_id() or ""):
                 return "最近一卦在其他群，请回原群解读。"
             reading = self.readings.render(
@@ -85,7 +89,7 @@ class CastPolicyMixin:
             )
             cast_at = datetime.fromtimestamp(last["timestamp"]).astimezone()
             return (
-                "复用原卦，不重新起卦、不占次数。可结合原问题和补充信息多次解读。\n"
+                "复用原卦：仅复用六爻原卦，不重新起六爻卦、不占次数。可结合补充信息多次解读。\n"
                 f"原卦时间：{cast_at.isoformat(timespec='seconds')}\n" + reading
             )
         except Exception:

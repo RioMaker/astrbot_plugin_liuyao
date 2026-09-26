@@ -50,7 +50,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.10.0"
+PLUGIN_VERSION = "0.10.1"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -64,8 +64,9 @@ HELP_TEXT = """六爻起卦插件
 /起卦 六爻 ...
 
 规则：无事不卜，必须说明具体事情，随便看看不予起卦。
-同一用户跨群滚动 60 分钟内最多起卦 3 次，即时与手动共用额度。
-同一事情禁止连续起卦；/六爻 解读 可反复解读最近原卦，不占次数。
+同一用户跨群滚动 60 分钟内最多起六爻卦 3 次，即时与手动共用额度。
+同一事情禁止连续起六爻卦；/六爻 解读 可反复解读最近六爻原卦，不占次数。
+五行数字卦独立：其记录、次数和死卦结果均不影响六爻，同一事项可分别测两种术数。
 
 起卦：
 /六爻 <问卦内容>
@@ -180,8 +181,11 @@ class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
         """为当前 QQ 群起六爻卦并发送排盘图；图成功后直接解卦并以断语收尾。
 
         无事不卜：用户只是随便看看、消遣、测试或未说明具体事情时，拒绝起卦并请其说明所问，禁止编造问题。
-        同一用户滚动 60 分钟最多 3 次。先结合对话判断是否仍为同一事情，换措辞也不能连续起卦；
-        同一事情的追问、多次解读必须复用原卦，调用 reuse_liuyao 或检索已有卦例，不调用本工具。
+        六爻与五行数字卦完全独立：五行数字的记录、次数、死卦或停问提示都不影响本工具。
+        用户仅测过五行数字卦，现在明确要求六爻时，即使是同一事项也应调用本工具，不能以已占过拒绝。
+        同一用户滚动 60 分钟最多起六爻卦 3 次，仅计算本插件成功保存的六爻记录。
+        只有已存在同一事项的六爻原卦时，追问或换措辞才应调用 reuse_liuyao 或检索六爻卦例复解；
+        五行数字结果不能作为六爻原卦复用，也不能写入六爻卦例。两边记录不互相增加或重置额度。
 
         Args:
             mode(string): 起卦方式，instant=即时天机；manual=手摇结果或直接指定卦名
@@ -326,8 +330,9 @@ class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
     async def reuse_liuyao_tool(self, event: AstrMessageEvent) -> str:
         """解读当前用户在本群的最近原卦，不起新卦也不占次数。
 
-        用户对同一事情追问、补充信息或要求再解读时调用；结合返回的原卦和对话解读，
-        禁止因不满意结果或换措辞再次调用 cast_liuyao。更早卦例可用 search_liuyao_cases 查询。
+        仅在用户已有六爻原卦、对此事追问或补充信息时调用；结合返回的六爻原卦和对话解读。
+        只有五行数字记录时不能使用本工具替代六爻起卦，应按用户要求调用 cast_liuyao。
+        禁止因不满意六爻结果或换措辞重起六爻卦。更早六爻卦例可用 search_liuyao_cases 查询。
         """
         return await self._reuse_cast(event, for_agent=True)
 

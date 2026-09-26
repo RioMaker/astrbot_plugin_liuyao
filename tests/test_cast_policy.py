@@ -147,3 +147,21 @@ def test_concurrent_same_matter_is_cast_only_once():
         assert sum("禁止连续" in reply for reply in replies) == 3
 
     asyncio.run(check())
+
+
+def test_wuxing_chat_history_is_not_a_liuyao_cast():
+    plugin = _make_enabled_plugin()
+    event = _Event("member")
+    event.message_str = "五行数字测过这次求职能否成功，连续三次死卦；现在想测六爻"
+
+    async def check():
+        empty = await plugin.reuse_liuyao_tool(event)
+        assert "尚无" in empty and "五行数字记录不能替代六爻原卦" in empty
+        result = await plugin.cast_liuyao_tool(event, question="这次求职能否成功")
+        assert "本卦：" in result
+        assert len(plugin._test_store["cast_policy:20002"]["timestamps"]) == 1
+        duplicate = await plugin.cast_liuyao_tool(event, question="这次求职能否成功")
+        assert "禁止连续起六爻卦" in duplicate
+        assert "本限制仅适用于六爻" in duplicate
+
+    asyncio.run(check())
