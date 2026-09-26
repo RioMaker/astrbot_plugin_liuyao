@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +16,11 @@ from astrbot.core.star.filter.command import GreedyStr
 if __package__:
     from .case_library import format_case_references, search_cases
     from .case_store import LiuyaoCaseStoreMixin
-    from .shefu import ShefuMixin
+    from .cast_policy import CastPolicyMixin
     from .corpus import CorpusError, ZhouyiCorpus
     from .divination import (
         CastResult,
         ManualCastError,
-        cast_instant,
         infer_intent,
         parse_intent_and_question,
         parse_manual_cast,
@@ -29,15 +28,15 @@ if __package__:
     )
     from .reading import ReadingService
     from .renderer import ChartRenderError, LiuyaoImageRenderer
+    from .shefu import ShefuMixin
 else:  # pragma: no cover - direct local execution
     from case_library import format_case_references, search_cases
     from case_store import LiuyaoCaseStoreMixin
-    from shefu import ShefuMixin
+    from cast_policy import CastPolicyMixin
     from corpus import CorpusError, ZhouyiCorpus
     from divination import (
         CastResult,
         ManualCastError,
-        cast_instant,
         infer_intent,
         parse_intent_and_question,
         parse_manual_cast,
@@ -45,12 +44,13 @@ else:  # pragma: no cover - direct local execution
     )
     from reading import ReadingService
     from renderer import ChartRenderError, LiuyaoImageRenderer
+    from shefu import ShefuMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.9.0"
+PLUGIN_VERSION = "0.10.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -63,14 +63,18 @@ HELP_TEXT = """六爻起卦插件
 /六爻 ...
 /起卦 六爻 ...
 
+规则：无事不卜，必须说明具体事情，随便看看不予起卦。
+同一用户跨群滚动 60 分钟内最多起卦 3 次，即时与手动共用额度。
+同一事情禁止连续起卦；/六爻 解读 可反复解读最近原卦，不占次数。
+
 起卦：
 /六爻 <问卦内容>
   例：/六爻 今年适合换工作吗
   例：/六爻 事业 今年适合换工作吗
 /起卦 六爻 <问卦内容>
-/六爻 即时 [方向] [问题]
+/六爻 即时 [方向] <具体问题>
   例：/六爻 即时 事业 今年是否适合换工作
-/六爻 手动 <六爻或卦名> [方向] [问题]
+/六爻 手动 <六爻或卦名> [方向] <具体问题>
   例：/六爻 手动 7 8 9 6 7 8 感情 这段关系该如何推进
   例：/六爻 手动 乾为天 事业 这个项目如何推进
   六爻数字必须按“初爻→上爻”（自下而上）填写。
@@ -93,7 +97,7 @@ HELP_TEXT = """六爻起卦插件
 方向：综合、事业、感情、财富、学业、健康、家庭、出行、射覆、天气。
 Agent 自动收到通则和匹配类别的离线研判参考；天气请提供地点与时段。
 分类卦例（仅 AstrBot 管理员）：/六爻 卦例 天气；其他方向同理。
-普通起卦指令会先发送详细排盘图；也可直接对 Agent 说“为我起一卦”，由 Agent 补全方向和署名短评。
+普通起卦指令会先发送详细排盘图；也可向 Agent 说明具体事情后要求起卦，由 Agent 补全方向和署名短评。
 Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情结果时，Agent 可续写为带实证的卦例。
 六爻承古法以察时变，解读以卦象、爻辞、六亲与所问为据。"""
 
@@ -105,7 +109,7 @@ Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情�
     PLUGIN_VERSION,
     PLUGIN_REPO,
 )
-class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
+class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.context = context
@@ -126,6 +130,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             logger.warning(f"liuyao：信息图渲染器不可用：{exc}")
         self._switch_lock = asyncio.Lock()
         self._case_lock = asyncio.Lock()
+        self._cast_lock = asyncio.Lock()
         self._pending_agent_cases: dict[str, list[str]] = {}
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
 
@@ -158,6 +163,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         reply = await self._dispatch_liuyao(event, liuyao_tail)
         if reply:
             yield event.plain_result(reply)
+
     # ------------------------------------------------------------------
     # Agent tools
     # ------------------------------------------------------------------
@@ -173,10 +179,14 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
     ) -> str:
         """为当前 QQ 群起六爻卦并发送排盘图；图成功后直接解卦并以断语收尾。
 
+        无事不卜：用户只是随便看看、消遣、测试或未说明具体事情时，拒绝起卦并请其说明所问，禁止编造问题。
+        同一用户滚动 60 分钟最多 3 次。先结合对话判断是否仍为同一事情，换措辞也不能连续起卦；
+        同一事情的追问、多次解读必须复用原卦，调用 reuse_liuyao 或检索已有卦例，不调用本工具。
+
         Args:
             mode(string): 起卦方式，instant=即时天机；manual=手摇结果或直接指定卦名
-            intent(string): 综合、事业、感情、财富、学业、健康、家庭、出行、射覆、天气；未指定传空，自动分类并返回对应参考文档
-            question(string): 用户所问的具体问题，可省略
+            intent(string): 综合、事业、感情、财富、学业、健康、家庭、出行、射覆、天气；传空自动分类
+            question(string): 用户真实所问的具体事情，必须填写；不得替无事消遣编造事由
             manual_lines(string): mode=manual 时填写六个 6/7/8/9，或填写乾、乾为天、第1卦等卦名
             agent_name(string): 当前 Agent 对用户使用的自称或人格名，如可可子；应主动传入
         """
@@ -186,7 +196,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
 
         normalized_mode = (mode or "instant").strip().lower()
         if normalized_mode in {"instant", "即时", "天机"}:
-            cast = cast_instant()
+            cast = None
             method = "即时天机（三枚铜币等概率模拟）"
         elif normalized_mode in {"manual", "手动", "铜币"}:
             try:
@@ -209,6 +219,15 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         elif inferred_intent == "weather" and self.readings.normalize_intent(intent) == "general":
             # Keep detected weather stable even if the short-comment model misclassifies it.
             intent = "weather"
+        cast, error = await self._prepare_cast(
+            event,
+            cast,
+            question=limited_question,
+            intent=intent or self._infer_intent_from_question(limited_question),
+            method=method,
+        )
+        if error:
+            return error
         cast_at = datetime.now().astimezone()
         (
             enriched_intent,
@@ -232,9 +251,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         intent_label_suffix = ""
         if intent_was_missing:
             intent_label_suffix = (
-                "（AI补全）"
-                if enrichment_status.startswith("当前会话模型")
-                else "（自动补全）"
+                "（AI补全）" if enrichment_status.startswith("当前会话模型") else "（自动补全）"
             )
         chart_status = await self._send_agent_chart(
             event,
@@ -305,6 +322,15 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             f"Agent最终回复要求：{final_requirement}"
         )
 
+    @filter.llm_tool(name="reuse_liuyao")
+    async def reuse_liuyao_tool(self, event: AstrMessageEvent) -> str:
+        """解读当前用户在本群的最近原卦，不起新卦也不占次数。
+
+        用户对同一事情追问、补充信息或要求再解读时调用；结合返回的原卦和对话解读，
+        禁止因不满意结果或换措辞再次调用 cast_liuyao。更早卦例可用 search_liuyao_cases 查询。
+        """
+        return await self._reuse_cast(event, for_agent=True)
+
     @filter.llm_tool(name="lookup_liuyao_reference")
     async def lookup_liuyao_reference_tool(
         self,
@@ -317,7 +343,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         返回完整正文及来源，不把古例日期和结果当成本次排盘或用户反馈。
 
         Args:
-            topic(string): 留空返回目录；支持综合、事业、感情、财富、学业、健康、家庭、出行、射覆、天气及英文类别键；基础或来源读取共同笔记和版本记录
+            topic(string): 留空返回目录；支持各方向及英文类别键；基础或来源读取共同笔记和版本记录
         """
         error = await self._group_gate(event, METHOD_LIUYAO)
         if error:
@@ -382,16 +408,13 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             primary_number=hexagram_number,
             caster_id=caster_id,
             limit=result_limit,
-            cross_group=bool(
-                self._config_get("case_library_cross_group", False)
-            ),
+            cross_group=bool(self._config_get("case_library_cross_group", False)),
         )
         if not matches:
             return "当前卦例库没有找到相关记录。"
         return (
             "找到以下历史卦例。只把已经记录的原断和反馈作为经验旁证，"
-            "仍须以当前卦象、动爻和所问为主：\n"
-            + format_case_references(matches)
+            "仍须以当前卦象、动爻和所问为主：\n" + format_case_references(matches)
         )
 
     @filter.llm_tool(name="record_liuyao_feedback")
@@ -505,9 +528,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
                 f"当前 AstrBot 模型接口不可用，已本地补为{label}",
             )
 
-        timeout = float(
-            self._config_get("agent_comment_timeout_seconds", 45) or 45
-        )
+        timeout = float(self._config_get("agent_comment_timeout_seconds", 45) or 45)
         timeout = min(max(timeout, 5), 90)
 
         try:
@@ -528,9 +549,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
                 ),
                 timeout=timeout,
             )
-            raw_response = str(
-                getattr(response, "completion_text", response) or ""
-            )
+            raw_response = str(getattr(response, "completion_text", response) or "")
             enriched_intent, comment = self._parse_chart_enrichment(
                 raw_response,
                 fallback_intent=base_intent,
@@ -581,7 +600,10 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         agent_name: str,
     ) -> str:
         chart_reading = self.readings.render(
-            cast, intent=base_intent, question="", method="图卡短评参考",
+            cast,
+            intent=base_intent,
+            question="",
+            method="图卡短评参考",
         )
         available_intents = "、".join(
             str(profile["label"]) for profile in self.readings.directions.values()
@@ -589,9 +611,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         reference_context = self.readings.reference_context(base_intent)
         base_label = str(self.readings.directions[base_intent]["label"])
         intent_instruction = (
-            "根据问题选择最贴切方向"
-            if intent_missing
-            else f"方向固定为“{base_label}”，不得更改"
+            "根据问题选择最贴切方向" if intent_missing else f"方向固定为“{base_label}”，不得更改"
         )
         return (
             "你正在为六爻排盘图生成一条署名短评。"
@@ -650,10 +670,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             candidates = {
                 key.lower(),
                 str(profile.get("label", "")).strip().lower(),
-                *{
-                    str(alias).strip().lower()
-                    for alias in profile.get("aliases", [])
-                },
+                *{str(alias).strip().lower() for alias in profile.get("aliases", [])},
             }
             if normalized in candidates:
                 return key
@@ -669,9 +686,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         return "卦象安静，宜守当前主线，察时待变。"
 
     def _agent_display_name(self, value: str) -> str:
-        fallback = str(
-            self._config_get("agent_display_name", "AI助手") or "AI助手"
-        )
+        fallback = str(self._config_get("agent_display_name", "AI助手") or "AI助手")
         cleaned = self._clean_short_text(value, 16)
         if not cleaned:
             cleaned = self._clean_short_text(fallback, 16)
@@ -679,9 +694,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
 
     @staticmethod
     def _clean_short_text(value: str, limit: int) -> str:
-        cleaned = " ".join(
-            str(value or "").replace("\x00", "").split()
-        ).strip()
+        cleaned = " ".join(str(value or "").replace("\x00", "").split()).strip()
         return cleaned[:limit]
 
     async def _send_agent_chart(
@@ -746,10 +759,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         caster_name, caster_id = self._caster_identity(event)
         group_id = str(event.get_group_id() or "").strip() or "未知"
         intent_key = self.readings.normalize_intent(intent)
-        intent_label = (
-            str(self.readings.directions[intent_key]["label"])
-            + intent_label_suffix
-        )
+        intent_label = str(self.readings.directions[intent_key]["label"]) + intent_label_suffix
         image_path: Path | None = None
         try:
             image_path = await asyncio.to_thread(
@@ -807,9 +817,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
             sender = self._raw_get(raw, "sender")
             name = str(
-                self._raw_get(sender, "card")
-                or self._raw_get(sender, "nickname")
-                or ""
+                self._raw_get(sender, "card") or self._raw_get(sender, "nickname") or ""
             ).strip()
         cleaned = " ".join(name.replace("\x00", "").split())[:80]
         return cleaned or "群友", sender_id
@@ -833,6 +841,8 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
 
         if token in {"help", "帮助", "说明"}:
             return HELP_TEXT
+        if token in {"解读", "复解", "reuse"}:
+            return await self._reuse_cast(event)
         if token == "卦例":
             return await self._case_browser(event, remainder)
         if token in {"即时", "天机", "instant"}:
@@ -848,10 +858,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         if token in {"开关", "switch"}:
             desired = self._parse_switch_state(remainder)
             if desired == "invalid":
-                return (
-                    "用法：/六爻 开|关|状态"
-                    "（旧写法：/六爻 开关 开|关|状态）"
-                )
+                return "用法：/六爻 开|关|状态（旧写法：/六爻 开关 开|关|状态）"
             return await self._switch_reply(event, METHOD_LIUYAO, desired)
 
         return await self._content_reply(event, text)
@@ -868,7 +875,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         intent, question = parse_intent_and_question(content)
         return await self._command_chart_reply(
             event,
-            cast_instant(),
+            None,
             intent=intent,
             question=self._limited_question(question),
             method="即时天机（简捷问卦）",
@@ -885,7 +892,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         intent, question = parse_intent_and_question(tail)
         return await self._command_chart_reply(
             event,
-            cast_instant(),
+            None,
             intent=intent,
             question=self._limited_question(question),
             method="即时天机（三枚铜币等概率模拟）",
@@ -928,26 +935,44 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
     async def _command_chart_reply(
         self,
         event: AstrMessageEvent,
-        cast: CastResult,
+        cast: CastResult | None,
         *,
         intent: str,
         question: str,
         method: str,
     ) -> str:
-        """Send the command chart, then return the existing textual reading."""
-        cast_at = datetime.now().astimezone()
+        """Admit a new cast, send its chart, then return its reading."""
         if self._infer_intent_from_question(question) == "shefu":
             intent = "shefu"
         elif self.readings.normalize_intent(intent) == "general":
             intent = self._infer_intent_from_question(question)
+        cast, error = await self._prepare_cast(
+            event,
+            cast,
+            question=question,
+            intent=intent,
+            method=method,
+        )
+        if error:
+            return error
+        cast_at = datetime.now().astimezone()
         shefu_analysis = ""
         if self.readings.normalize_intent(intent) == "shefu":
             case_id, references, case_status = await self._open_agent_case(
-                event, cast, intent="shefu", question=question, method=method,
-                cast_at=cast_at, track_agent=False,
+                event,
+                cast,
+                intent="shefu",
+                question=question,
+                method=method,
+                cast_at=cast_at,
+                track_agent=False,
             )
             shefu_analysis = await self._generate_shefu_analysis(
-                event, cast, question, method, references,
+                event,
+                cast,
+                question,
+                method,
+                references,
             )
             if case_id:
                 await self._save_case_analysis(event, case_id, shefu_analysis)
@@ -1033,10 +1058,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
             return "六爻起卦仅面向 QQ 群聊使用。"
         if not await self._is_method_enabled(group_id, method):
             label = METHOD_LABELS.get(method, method)
-            return (
-                f"本群“{label}”功能尚未开启，"
-                f"请群主、群管理员或 AstrBot 管理员发送 /{label} 开。"
-            )
+            return f"本群“{label}”功能尚未开启，请群主、群管理员或 AstrBot 管理员发送 /{label} 开。"
         return ""
 
     async def _is_method_enabled(self, group_id: str, method: str) -> bool:
@@ -1084,11 +1106,7 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         allowed_roles = {"owner", "admin"}
         raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
         sender = self._raw_get(raw, "sender")
-        role = str(
-            self._raw_get(sender, "role")
-            or self._raw_get(raw, "role")
-            or ""
-        ).lower()
+        role = str(self._raw_get(sender, "role") or self._raw_get(raw, "role") or "").lower()
         if role in allowed_roles:
             return True
         if role:
@@ -1124,7 +1142,6 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
         if isinstance(method_defaults, dict) and method in method_defaults:
             return bool(method_defaults[method])
         return bool(self._config_get("default_enabled", False))
-
 
     def _limited_question(self, value: str) -> str:
         limit = int(self._config_get("max_question_length", 200) or 200)
@@ -1162,10 +1179,3 @@ class LiuyaoPlugin(ShefuMixin, LiuyaoCaseStoreMixin, Star):
 
     async def terminate(self):
         logger.info("liuyao 插件已卸载")
-
-
-
-
-
-
-

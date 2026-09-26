@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -63,7 +63,7 @@ sys.modules.setdefault("astrbot.core.star.filter.command", command_api)
 
 from corpus import ZhouyiCorpus  # noqa: E402
 from divination import CastResult  # noqa: E402
-from main import LiuyaoPlugin, METHOD_LIUYAO  # noqa: E402
+from main import METHOD_LIUYAO, LiuyaoPlugin  # noqa: E402
 from reading import ReadingService  # noqa: E402
 
 
@@ -121,6 +121,7 @@ def _make_enabled_plugin() -> LiuyaoPlugin:
     plugin.get_kv_data = get_data
     plugin.put_kv_data = put_data
     plugin._case_lock = asyncio.Lock()
+    plugin._cast_lock = asyncio.Lock()
     plugin._pending_agent_cases = {}
     plugin._test_store = store
     return plugin
@@ -131,12 +132,7 @@ def test_owner_group_admin_and_astrbot_admin_are_accepted() -> None:
     plugin.config = {"allow_operator_api_lookup": False}
     assert asyncio.run(plugin._can_manage_switch(_Event("owner"))) is True
     assert asyncio.run(plugin._can_manage_switch(_Event("admin"))) is True
-    assert (
-        asyncio.run(
-            plugin._can_manage_switch(_Event("member", astrbot_admin=True))
-        )
-        is True
-    )
+    assert asyncio.run(plugin._can_manage_switch(_Event("member", astrbot_admin=True))) is True
     assert asyncio.run(plugin._can_manage_switch(_Event("member"))) is False
 
 
@@ -221,7 +217,7 @@ def test_source_registers_flat_commands_and_agent_tools() -> None:
     assert '@filter.llm_tool(name="lookup_zhouyi_text")' in source
     assert '@filter.llm_tool(name="search_liuyao_cases")' in source
     assert '@filter.llm_tool(name="record_liuyao_feedback")' in source
-    assert '@filter.on_agent_done()' in source
+    assert "@filter.on_agent_done()" in source
     assert "QQ 群主、QQ 群管理员或 AstrBot 管理员" in source
     compile(source, str(ROOT / "main.py"), "exec")
 
@@ -268,9 +264,7 @@ def test_bare_liuyao_content_recognizes_intent_prefix() -> None:
 
 def test_reserved_subcommands_remain_available() -> None:
     plugin = _make_enabled_plugin()
-    help_result = asyncio.run(
-        plugin._dispatch_liuyao(_Event("member"), "help")
-    )
+    help_result = asyncio.run(plugin._dispatch_liuyao(_Event("member"), "help"))
     instant_result = asyncio.run(
         plugin._dispatch_liuyao(
             _Event("member"),
@@ -281,6 +275,7 @@ def test_reserved_subcommands_remain_available() -> None:
     assert "方式：即时天机（三枚铜币等概率模拟）" in instant_result
     assert "意图：感情" in instant_result
     assert "所问：这段关系如何发展" in instant_result
+
 
 def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     class FakeRenderer:
@@ -307,8 +302,7 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
             self.prompt = prompt
             return types.SimpleNamespace(
                 completion_text=(
-                    '{"intent":"事业","comment":'
-                    '"先核实机会与成本，再择稳妥时点推进。"}'
+                    '{"intent":"事业","comment":"先核实机会与成本，再择稳妥时点推进。"}'
                 )
             )
 
@@ -355,9 +349,7 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     assert len(cases) == 1
     case_id = cases[0]["id"]
     final_analysis = (
-        "结论：此事能成，但要先过成本关。\n"
-        "以动爻和之卦看，主证强于反证。\n"
-        "断语：三个月内先难后成。"
+        "结论：此事能成，但要先过成本关。\n以动爻和之卦看，主证强于反证。\n断语：三个月内先难后成。"
     )
     asyncio.run(
         plugin.capture_liuyao_agent_analysis(
@@ -416,9 +408,7 @@ def test_plain_command_sends_local_chart_without_duplicate_text(tmp_path) -> Non
     plugin.renderer = renderer
     event = _Event("member")
 
-    result = asyncio.run(
-        plugin._content_reply(event, "事业 今年是否适合换工作")
-    )
+    result = asyncio.run(plugin._content_reply(event, "事业 今年是否适合换工作"))
 
     assert len(event.sent) == 1
     assert event.sent[0]["image"].endswith("command-chart.png")
@@ -435,12 +425,13 @@ def test_plain_command_sends_local_chart_without_duplicate_text(tmp_path) -> Non
             item
             async for item in plugin.liuyao_command(
                 second_event,
-                "事业 今年是否适合换工作",
+                "事业 这个项目如何推进",
             )
         ]
 
     assert asyncio.run(collect_root_results()) == []
     assert len(second_event.sent) == 1
+
 
 def test_agent_chart_timeout_has_explicit_fallback_status() -> None:
     class TimeoutContext:
@@ -472,6 +463,7 @@ def test_agent_chart_timeout_has_explicit_fallback_status() -> None:
     assert comment
     assert status == "AI补全超时（5 秒），已使用本地保守提示（事业）"
 
+
 def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
     plugin = _make_enabled_plugin()
     plugin.renderer = None
@@ -482,7 +474,7 @@ def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
             event,
             mode="instant",
             intent="general",
-            question="近期运势如何",
+            question="本周这个项目能否签约",
         )
     )
 
@@ -491,4 +483,3 @@ def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
     assert "本卦：" in result
     assert "排盘图未能发送" in result
     assert "断语：" in result
-

@@ -7,10 +7,9 @@ import re
 from pathlib import Path
 
 import pytest
-
 from test_permissions import _Event, _make_enabled_plugin
-from reference_library import StudyReferenceLibrary
 
+from reference_library import StudyReferenceLibrary
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTES = ROOT / "docs" / "study"
@@ -21,7 +20,10 @@ def test_catalog_covers_all_topics_with_three_distinct_sourced_cases():
     library = plugin.readings.study_references
     assert not library.errors
     assert set(library.documents) == {
-        "index", "foundations", "sources", *plugin.readings.directions,
+        "index",
+        "foundations",
+        "sources",
+        *plugin.readings.directions,
     }
     all_ids = []
     for key in plugin.readings.directions:
@@ -31,11 +33,16 @@ def test_catalog_covers_all_topics_with_three_distinct_sourced_cases():
         assert "## 给 Agent 的研判要求" in document
         cases = re.split(r"(?m)^### ([A-Z]{2}-\d{3}) ", document)
         assert len(cases) == 7, key
-        for case_id, content in zip(cases[1::2], cases[2::2]):
+        for case_id, content in zip(cases[1::2], cases[2::2], strict=True):
             all_ids.append(case_id)
             for field in (
-                "出处", "原问与时日", "卦象/关键爻", "原断摘录",
-                "书载结果", "整理者分析", "限制",
+                "出处",
+                "原问与时日",
+                "卦象/关键爻",
+                "原断摘录",
+                "书载结果",
+                "整理者分析",
+                "限制",
             ):
                 assert f"- {field}" in content, (case_id, field)
             assert "https://" in content and "定位" in content
@@ -56,10 +63,21 @@ def test_local_markdown_links_resolve():
             resolved.relative_to(ROOT)
 
 
-@pytest.mark.parametrize("topic", [
-    "general", "career", "relationship", "wealth", "study", "health",
-    "family", "travel", "shefu", "weather",
-])
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "general",
+        "career",
+        "relationship",
+        "wealth",
+        "study",
+        "health",
+        "family",
+        "travel",
+        "shefu",
+        "weather",
+    ],
+)
 def test_any_topic_and_all_aliases_return_full_notes_without_casting(topic):
     plugin = _make_enabled_plugin()
     event = _Event("member")
@@ -100,10 +118,21 @@ def test_tool_respects_group_switch_and_private_chat_gate():
     assert "仅面向 QQ 群聊" in result
 
 
-@pytest.mark.parametrize("topic", [
-    "../sources", "../../main.py", "D:/secret.md", "topics/weather.md",
-    "weather/../health", "http://example.com", "不存在", "a" * 81, None, [],
-])
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "../sources",
+        "../../main.py",
+        "D:/secret.md",
+        "topics/weather.md",
+        "weather/../health",
+        "http://example.com",
+        "不存在",
+        "a" * 81,
+        None,
+        [],
+    ],
+)
 def test_untrusted_parameters_never_read_files_or_fall_back(topic):
     library = _make_enabled_plugin().readings.study_references
     result = library.lookup(topic)
@@ -112,7 +141,8 @@ def test_untrusted_parameters_never_read_files_or_fall_back(topic):
 
 
 @pytest.mark.parametrize(
-    "payload", [b"", b"\xff", b"a" * 14_001, b"a" * 60_001],
+    "payload",
+    [b"", b"\xff", b"a" * 14_001, b"a" * 60_001],
     ids=["empty", "invalid-utf8", "too-many-characters", "too-many-bytes"],
 )
 def test_broken_topic_fails_soft_without_substitution(tmp_path, payload):
@@ -148,7 +178,9 @@ def test_missing_notes_do_not_break_casting_or_private_archive_permissions(tmp_p
     plugin = _make_enabled_plugin()
     plugin.readings.study_references = StudyReferenceLibrary(tmp_path, plugin.readings.directions)
     plugin.config["agent_generate_chart_comment"] = False
-    result = asyncio.run(plugin.cast_liuyao_tool(_Event("member"), intent="weather"))
+    result = asyncio.run(
+        plugin.cast_liuyao_tool(_Event("member"), intent="weather", question="明天杭州是否下雨")
+    )
     assert "本卦：" in result and "lookup_liuyao_reference" in result
     assert "未加载" in asyncio.run(plugin.lookup_liuyao_reference_tool(_Event("member"), "天气"))
     assert "仅 AstrBot 管理员" in asyncio.run(plugin._case_browser(_Event("member"), ""))
