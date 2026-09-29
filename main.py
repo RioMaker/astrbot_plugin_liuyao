@@ -14,6 +14,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
 if __package__:
+    from .agent_analysis import AgentAnalysisMixin
     from .case_library import format_case_references, search_cases
     from .case_store import LiuyaoCaseStoreMixin
     from .cast_policy import CastPolicyMixin
@@ -30,6 +31,7 @@ if __package__:
     from .renderer import ChartRenderError, LiuyaoImageRenderer
     from .shefu import ShefuMixin
 else:  # pragma: no cover - direct local execution
+    from agent_analysis import AgentAnalysisMixin
     from case_library import format_case_references, search_cases
     from case_store import LiuyaoCaseStoreMixin
     from cast_policy import CastPolicyMixin
@@ -50,7 +52,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.10.1"
+PLUGIN_VERSION = "0.10.2"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -110,7 +112,7 @@ Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情�
     PLUGIN_VERSION,
     PLUGIN_REPO,
 )
-class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
+class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.context = context
@@ -313,7 +315,7 @@ class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
                 "写断语；缺信息时说明待补。图已发送不重复排盘，失败先简述卦象。"
             )
         caster_name, caster_id = self._caster_identity(event)
-        return (
+        tool_result = (
             f"{reading}\n"
             f"起卦人：{caster_name}（QQ {caster_id}）\n"
             f"起卦时间：{cast_at.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
@@ -325,6 +327,8 @@ class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
             f"卦例留档：{case_status}\n"
             f"Agent最终回复要求：{final_requirement}"
         )
+        self._remember_agent_reading(event, tool_result)
+        return tool_result
 
     @filter.llm_tool(name="reuse_liuyao")
     async def reuse_liuyao_tool(self, event: AstrMessageEvent) -> str:
@@ -468,23 +472,8 @@ class LiuyaoPlugin(CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
         run_context: Any,
         resp: Any,
     ) -> None:
-        """Persist the final Agent interpretation for a cast made in this run."""
-        del run_context
-        pending = getattr(self, "_pending_agent_cases", {})
-        case_ids = pending.pop(self._agent_run_key(event), [])
-        if isinstance(case_ids, str):
-            case_ids = [case_ids]
-        if not case_ids:
-            return
-        analysis = self._clean_case_text(
-            str(getattr(resp, "completion_text", "") or ""),
-            8000,
-        )
-        if not analysis:
-            logger.warning("liuyao：本轮卦例未取得 Agent 最终分析：%s", case_ids)
-            return
-        for case_id in case_ids:
-            await self._save_case_analysis(event, case_id, analysis)
+        """Persist final analysis, recovering an empty reply from the original cast."""
+        await self._finish_agent_analysis(event, run_context, resp)
 
     async def _enrich_agent_chart(
         self,

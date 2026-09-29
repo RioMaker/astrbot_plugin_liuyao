@@ -71,6 +71,12 @@
     "hint": "允许范围 5-90；超时或模型失败时自动使用本地保守提示，不影响发图和文字解卦。",
     "default": 45
   },
+  "agent_analysis_timeout_seconds": {
+    "type": "int",
+    "description": "Agent 空回复后补解原卦的超时秒数",
+    "hint": "允许范围 10-180，默认 90。仅在本轮起卦后 Agent 没有正文时调用当前模型补解一次，不重新起卦；失败会发送提示。",
+    "default": 90
+  },
   "chart_font_path": {
     "type": "string",
     "description": "六爻信息图自定义中文字体路径",
