@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import os
-from pathlib import Path
 import tempfile
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
 try:
     from .corpus import ZhouyiCorpus
-    from .divination import CastResult, LINE_NAMES
+    from .divination import LINE_NAMES, CastResult
     from .najia import HexagramRelatives, relatives_for_bits
+    from .paipan import beijing_time, chart_for
 except ImportError:  # pragma: no cover - direct local execution
     from corpus import ZhouyiCorpus
-    from divination import CastResult, LINE_NAMES
+    from divination import LINE_NAMES, CastResult
     from najia import HexagramRelatives, relatives_for_bits
+    from paipan import beijing_time, chart_for
 
 
 WIDTH = 1240
@@ -31,10 +33,7 @@ GOLD = "#B88A3B"
 PANEL = "#FBF5E7"
 LINE_LABELS = {1: "初爻", 2: "二爻", 3: "三爻", 4: "四爻", 5: "五爻", 6: "上爻"}
 BUNDLED_FONT_PATH = (
-    Path(__file__).resolve().parent
-    / "assets"
-    / "fonts"
-    / "NotoSansCJKsc-Regular.otf"
+    Path(__file__).resolve().parent / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"
 )
 
 
@@ -70,7 +69,7 @@ class LiuyaoImageRenderer:
         intent_label: str,
         question: str,
         method: str,
-        cast_at: datetime,
+        cast_at: datetime | None,
         agent_name: str = "AI助手",
         ai_comment: str = "",
         comment_title: str = "AI短评",
@@ -79,6 +78,12 @@ class LiuyaoImageRenderer:
         primary = self.corpus.get(cast.primary_number)
         changed = self.corpus.get(cast.changed_number)
         moving = cast.moving_lines
+        chart = chart_for(cast, cast_at)
+        # The header and calculated pillars must refer to the same original instant.
+        if chart["calendar"].get("cast_at"):
+            cast_at = datetime.fromisoformat(chart["calendar"]["cast_at"])
+        elif cast_at is not None and cast_at.tzinfo is not None:
+            cast_at = beijing_time(cast_at)
         primary_relatives = relatives_for_bits(cast.primary_bits)
         changed_relatives = relatives_for_bits(
             cast.changed_bits,
@@ -91,6 +96,7 @@ class LiuyaoImageRenderer:
             "section": self._font(31, bold=True),
             "body": self._font(25),
             "small": self._font(21),
+            "tiny": self._font(18),
             "line": self._font(23, bold=True),
             "symbol": self._font(58),
         }
@@ -112,7 +118,28 @@ class LiuyaoImageRenderer:
             fonts["body"],
             WIDTH - 2 * MARGIN - 176,
         )
-        detail_rows = self._detail_rows(primary, changed, cast)
+        calendar = chart["calendar"]
+        detail_rows = [("排盘口径", calendar["rule"])]
+        if calendar["status"] == "已计算":
+            detail_rows.append(
+                (
+                    "干支",
+                    f"{calendar['year']}年 {calendar['month']}月 {calendar['day']}日 "
+                    f"{calendar['hour']}时；月建 {calendar['month_branch']}；"
+                    f"日辰 {calendar['day_branch']}；{calendar['xun']}旬，"
+                    f"旬空 {calendar['xun_kong']}",
+                )
+            )
+        else:
+            detail_rows.append(("日月干支/旬空/六神", calendar["status"]))
+        detail_rows.append(
+            (
+                "世应与伏神",
+                f"世在{chart['shi']}爻、应在{chart['ying']}爻；"
+                "伏神按本卦缺失六亲取本宫首卦候选，不等于已选用神",
+            )
+        )
+        detail_rows.extend(self._detail_rows(primary, changed, cast))
         detail_lines: list[tuple[str, bool]] = []
         for label, value in detail_rows:
             wrapped = self._wrap(
@@ -121,22 +148,13 @@ class LiuyaoImageRenderer:
                 fonts["body"],
                 WIDTH - 2 * MARGIN - 48,
             )
-            detail_lines.extend(
-                (line, index == 0) for index, line in enumerate(wrapped)
-            )
+            detail_lines.extend((line, index == 0) for index, line in enumerate(wrapped))
 
         meta_height = 196 + max(1, len(question_lines)) * 38
         comment_height = 96 + max(1, len(comment_lines)) * 38
-        diagram_height = 540
+        diagram_height = 620
         details_height = 112 + len(detail_lines) * 39
-        canvas_height = (
-            156
-            + meta_height
-            + comment_height
-            + diagram_height
-            + details_height
-            + 100
-        )
+        canvas_height = 156 + meta_height + comment_height + diagram_height + details_height + 100
         canvas = Image.new("RGB", (WIDTH, canvas_height), PAPER)
         draw = ImageDraw.Draw(canvas)
         self._draw_background(draw, canvas_height)
@@ -172,6 +190,7 @@ class LiuyaoImageRenderer:
             primary_relatives,
             changed_relatives,
             fonts,
+            chart,
         )
         y = self._draw_details(
             draw,
@@ -216,7 +235,7 @@ class LiuyaoImageRenderer:
         primary: dict[str, Any],
         changed: dict[str, Any],
         moving: tuple[int, ...],
-        cast_at: datetime,
+        cast_at: datetime | None,
         fonts: dict[str, ImageFont.FreeTypeFont],
     ) -> int:
         draw.rounded_rectangle(
@@ -239,7 +258,12 @@ class LiuyaoImageRenderer:
         )
         draw.text(
             (WIDTH - MARGIN, 98),
-            cast_at.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
+            (
+                cast_at.strftime("%Y-%m-%d %H:%M:%S %Z")
+                + ("（时区未知）" if cast_at.tzinfo is None else "")
+            )
+            if cast_at is not None
+            else "原起卦时间未知",
             font=fonts["small"],
             fill="#D8DFD8",
             anchor="ra",
@@ -337,6 +361,7 @@ class LiuyaoImageRenderer:
             )
             text_y += 38
         return y + height
+
     def _draw_diagram(
         self,
         draw: ImageDraw.ImageDraw,
@@ -348,6 +373,7 @@ class LiuyaoImageRenderer:
         primary_relatives: HexagramRelatives,
         changed_relatives: HexagramRelatives,
         fonts: dict[str, ImageFont.FreeTypeFont],
+        chart: dict[str, Any],
     ) -> int:
         top = y + 4
         bottom = y + height - 16
@@ -359,9 +385,7 @@ class LiuyaoImageRenderer:
             width=2,
         )
 
-        primary_title = (
-            f"本卦 · 第{primary['number']}卦 {primary['name']}"
-        )
+        primary_title = f"本卦 · 第{primary['number']}卦 {primary['name']}"
         changed_title = (
             f"之卦 · 第{changed['number']}卦 {changed['name']}"
             if cast.moving_lines
@@ -392,7 +416,9 @@ class LiuyaoImageRenderer:
 
         first_y = top + 138
         for row, position in enumerate(range(6, 0, -1)):
-            line_y = first_y + row * 58
+            line_y = first_y + row * 72
+            facts = chart["primary"][position - 1]
+            changed_facts = chart["changed"][position - 1]
             value = cast.lines[position - 1]
             is_moving = value in {6, 9}
             draw.text(
@@ -411,8 +437,8 @@ class LiuyaoImageRenderer:
             draw.text(
                 (430, line_y - 12),
                 (
-                    f"{value} {LINE_NAMES[value]} · "
-                    f"{primary_relatives.lines[position - 1].label}"
+                    f"{value} {LINE_NAMES[value].replace('（动）', '')} · "
+                    f"{facts['relative']}{facts['stem']}{facts['branch']}{facts['element']}"
                 ),
                 font=fonts["small"],
                 fill=ACCENT if is_moving else INK,
@@ -426,10 +452,17 @@ class LiuyaoImageRenderer:
             )
             draw.text(
                 (980, line_y - 12),
-                changed_relatives.lines[position - 1].label,
+                f"{changed_facts['relative']}{changed_facts['stem']}"
+                f"{changed_facts['branch']}{changed_facts['element']}",
                 font=fonts["small"],
                 fill=ACCENT if is_moving else MUTED,
             )
+            draw.text((MARGIN + 24, line_y + 17), facts["spirit"], font=fonts["tiny"], fill=MUTED)
+            hidden = facts["hidden"]
+            note = (facts["role"] + "爻") if facts["role"] else ""
+            if hidden:
+                note += (" · " if note else "") + "伏：" + hidden["label"]
+            draw.text((430, line_y + 17), note, font=fonts["tiny"], fill=JADE)
             if is_moving:
                 marker = "○" if value == 9 else "×"
                 draw.text(
@@ -575,6 +608,3 @@ class LiuyaoImageRenderer:
     @staticmethod
     def _clean(value: str) -> str:
         return " ".join(str(value or "").replace("\x00", "").split())
-
-
-

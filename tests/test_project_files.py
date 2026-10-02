@@ -22,14 +22,15 @@ def test_configuration_and_metadata_contract() -> None:
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert 'version: "0.10.2"' in metadata
+    assert 'version: "0.11.0"' in metadata
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert 'PLUGIN_VERSION = "0.10.2"' in main_source
+    assert 'PLUGIN_VERSION = "0.11.0"' in main_source
     assert '@filter.llm_tool(name="lookup_liuyao_reference")' in main_source
     assert 'astrbot_version: ">=4.24.0"' in metadata
     assert "aiocqhttp" in metadata
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert "Pillow>=10.0.0" in requirements
+    assert "lunar_python==1.4.8" in requirements
     font = ROOT / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"
     font_license = ROOT / "assets" / "fonts" / "LICENSE.txt"
     assert font.stat().st_size > 10_000_000

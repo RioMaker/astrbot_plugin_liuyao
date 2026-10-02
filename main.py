@@ -52,7 +52,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.10.2"
+PLUGIN_VERSION = "0.11.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -234,7 +234,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         )
         if error:
             return error
-        cast_at = datetime.now().astimezone()
+        cast_at = cast.cast_at
         (
             enriched_intent,
             display_agent_name,
@@ -949,7 +949,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         )
         if error:
             return error
-        cast_at = datetime.now().astimezone()
+        cast_at = cast.cast_at
         shefu_analysis = ""
         if self.readings.normalize_intent(intent) == "shefu":
             case_id, references, case_status = await self._open_agent_case(

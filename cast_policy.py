@@ -2,15 +2,18 @@
 
 import math
 import time
+from dataclasses import replace
 from datetime import datetime
 
 from astrbot.api import logger
 
 if __package__:
     from .divination import CastResult, cast_instant
+    from .paipan import BEIJING, build_chart
     from .question_policy import normalize_question, question_error
 else:
     from divination import CastResult, cast_instant
+    from paipan import BEIJING, build_chart
     from question_policy import normalize_question, question_error
 
 
@@ -43,6 +46,8 @@ class CastPolicyMixin:
                     )
                 # Generate only after admission; no await between generating and saving the record.
                 cast = cast if cast is not None else cast_instant()
+                cast = replace(cast, cast_at=datetime.fromtimestamp(now, BEIJING), chart=None)
+                cast = replace(cast, chart=build_chart(cast))
                 await self.put_kv_data(
                     key,
                     {
@@ -53,6 +58,7 @@ class CastPolicyMixin:
                             "method": method,
                             "lines": list(cast.lines),
                             "timestamp": now,
+                            "chart": cast.chart,
                             "group_id": str(event.get_group_id() or ""),
                         },
                     },
@@ -80,17 +86,21 @@ class CastPolicyMixin:
                 )
             if last.get("group_id") != str(event.get_group_id() or ""):
                 return "最近一卦在其他群，请回原群解读。"
+            try:
+                cast_at = datetime.fromtimestamp(last["timestamp"], BEIJING)
+            except (KeyError, TypeError, ValueError, OverflowError, OSError):
+                cast_at = None
             reading = self.readings.render(
-                CastResult(tuple(last["lines"])),
+                CastResult(tuple(last["lines"]), cast_at=cast_at, chart=last.get("chart")),
                 intent=last["intent"],
                 question=last["question"],
                 method=last["method"],
                 for_agent=for_agent,
             )
-            cast_at = datetime.fromtimestamp(last["timestamp"]).astimezone()
             return (
                 "复用原卦：仅复用六爻原卦，不重新起六爻卦、不占次数。可结合补充信息多次解读。\n"
-                f"原卦时间：{cast_at.isoformat(timespec='seconds')}\n" + reading
+                f"原卦时间：{cast_at.isoformat(timespec='seconds') if cast_at else '未知'}\n"
+                + reading
             )
         except Exception:
             return "原卦读取失败，请稍后重试；不要因此重新起卦。"

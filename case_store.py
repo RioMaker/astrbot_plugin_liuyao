@@ -19,6 +19,7 @@ try:
         trim_cases,
     )
     from .najia import relatives_for_bits
+    from .paipan import chart_for
 except ImportError:  # pragma: no cover - direct local execution
     from case_library import (
         extract_verdict,
@@ -29,6 +30,7 @@ except ImportError:  # pragma: no cover - direct local execution
         trim_cases,
     )
     from najia import relatives_for_bits
+    from paipan import chart_for
 
 
 LIUYAO_CASES_KEY = "liuyao_case_library"
@@ -70,12 +72,8 @@ class LiuyaoCaseStoreMixin:
                     changed_number=cast.changed_number,
                     moving_lines=cast.moving_lines,
                     caster_id=caster_id,
-                    limit=self._bounded_config_int(
-                        "case_reference_limit", 3, 1, 5
-                    ),
-                    cross_group=bool(
-                        self._config_get("case_library_cross_group", False)
-                    ),
+                    limit=self._bounded_config_int("case_reference_limit", 3, 1, 5),
+                    cross_group=bool(self._config_get("case_library_cross_group", False)),
                 )
                 case = self._build_case_record(
                     event,
@@ -89,9 +87,7 @@ class LiuyaoCaseStoreMixin:
                 )
                 case["serial"] = serialize_case_store(cases, payload)["next_serial"]
                 cases.append(case)
-                maximum = self._bounded_config_int(
-                    "case_library_max_records", 500, 20, 5000
-                )
+                maximum = self._bounded_config_int("case_library_max_records", 500, 20, 5000)
                 await put_data(
                     LIUYAO_CASES_KEY,
                     serialize_case_store(trim_cases(cases, maximum), payload),
@@ -114,9 +110,7 @@ class LiuyaoCaseStoreMixin:
                 "排盘已保存；Agent 最终回复完成后将自动写入分析与断语。",
             )
         except Exception as exc:
-            logger.exception(
-                "liuyao：创建卦例失败（%s）：%r", type(exc).__name__, exc
-            )
+            logger.exception("liuyao：创建卦例失败（%s）：%r", type(exc).__name__, exc)
             return "", "", f"卦例保存失败（{type(exc).__name__}）。"
 
     def _build_case_record(
@@ -141,7 +135,7 @@ class LiuyaoCaseStoreMixin:
         intent_key = self.readings.normalize_intent(intent)
         timestamp = cast_at.isoformat()
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "id": f"LY-{cast_at.strftime('%Y%m%d')}-{uuid4().hex[:8]}",
             "created_at": timestamp,
             "updated_at": timestamp,
@@ -154,6 +148,7 @@ class LiuyaoCaseStoreMixin:
             "question": question,
             "method": method,
             "cast": {
+                "chart": chart_for(cast, cast_at),
                 "lines": list(cast.lines),
                 "primary_number": int(primary["number"]),
                 "primary_name": str(primary["name"]),
@@ -173,12 +168,8 @@ class LiuyaoCaseStoreMixin:
                 ],
                 "palace": primary_relatives.palace,
                 "palace_element": primary_relatives.palace_element,
-                "primary_relatives": [
-                    line.label for line in primary_relatives.lines
-                ],
-                "changed_relatives": [
-                    line.label for line in changed_relatives.lines
-                ],
+                "primary_relatives": [line.label for line in primary_relatives.lines],
+                "changed_relatives": [line.label for line in changed_relatives.lines],
             },
             "analysis": "",
             "answer": "",
@@ -220,9 +211,7 @@ class LiuyaoCaseStoreMixin:
                 await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases, payload))
             logger.info("liuyao：已自动保存卦例分析 %s", case_id)
         except Exception as exc:
-            logger.exception(
-                "liuyao：保存卦例分析失败（%s）：%r", type(exc).__name__, exc
-            )
+            logger.exception("liuyao：保存卦例分析失败（%s）：%r", type(exc).__name__, exc)
 
     async def _append_case_feedback(
         self,
@@ -272,12 +261,12 @@ class LiuyaoCaseStoreMixin:
                     key=lambda item: str(item.get("created_at") or ""),
                 )
                 feedback_rows = [
-                    dict(item)
-                    for item in case.get("feedback", [])
-                    if isinstance(item, dict)
+                    dict(item) for item in case.get("feedback", []) if isinstance(item, dict)
                 ]
-                if any(item.get("text") == feedback and item.get("answer", "") == answer
-                       for item in feedback_rows):
+                if any(
+                    item.get("text") == feedback and item.get("answer", "") == answer
+                    for item in feedback_rows
+                ):
                     return f"卦例 {case['serial']:03d} 已记录该反馈。"
                 observed_at = datetime.now().astimezone().isoformat()
                 feedback_rows.append(
@@ -299,9 +288,7 @@ class LiuyaoCaseStoreMixin:
                 return f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。"
             return f"已将反馈写入卦例 {case['id']}（{outcome}）。"
         except Exception as exc:
-            logger.exception(
-                "liuyao：保存卦例反馈失败（%s）：%r", type(exc).__name__, exc
-            )
+            logger.exception("liuyao：保存卦例反馈失败（%s）：%r", type(exc).__name__, exc)
             return f"卦例反馈保存失败（{type(exc).__name__}）。"
 
     async def _load_case_records(self) -> list[dict[str, Any]]:
@@ -313,9 +300,7 @@ class LiuyaoCaseStoreMixin:
         try:
             return normalize_case_store(await get_data(LIUYAO_CASES_KEY, {}))
         except Exception as exc:
-            logger.warning(
-                "liuyao：读取卦例库失败（%s）：%r", type(exc).__name__, exc
-            )
+            logger.warning("liuyao：读取卦例库失败（%s）：%r", type(exc).__name__, exc)
             return []
 
     def _case_lock_instance(self) -> asyncio.Lock:
@@ -360,15 +345,9 @@ class LiuyaoCaseStoreMixin:
         text = str(value or "").strip().lower()
         if any(token in text for token in ("部分", "一半", "part")):
             return "部分应验"
-        if any(
-            token in text
-            for token in ("未应验", "没应验", "相反", "不准", "fail")
-        ):
+        if any(token in text for token in ("未应验", "没应验", "相反", "不准", "fail")):
             return "未应验"
-        if any(
-            token in text
-            for token in ("应验", "符合", "实现", "成了", "fulfilled")
-        ):
+        if any(token in text for token in ("应验", "符合", "实现", "成了", "fulfilled")):
             return "应验"
         if any(token in text for token in ("进行", "尚未", "等待", "pending")):
             return "进行中"
