@@ -244,5 +244,5 @@ def test_renderer_shows_snapshot_pillars_and_original_beijing_time(tmp_path, mon
     text = "\n".join(drawn)
     assert "2026-10-02 12:00:00" in text and "己酉日" in text
     assert "旬空 寅卯" in text and "螣蛇" in text
-    assert "世爻 · 伏：妻财寅木" in text and "应爻" in text
-    assert "伏：子孙子水" in text
+    assert "世" in drawn and "应" in drawn
+    assert "妻财寅木" in drawn and "子孙子水" in drawn

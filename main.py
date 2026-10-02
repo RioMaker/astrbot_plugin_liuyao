@@ -52,7 +52,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.11.0"
+PLUGIN_VERSION = "0.11.1"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"

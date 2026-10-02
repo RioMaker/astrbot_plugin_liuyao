@@ -1,4 +1,4 @@
-"""Render a detailed six-line divination chart as a local PNG."""
+"""Render an ivory-and-jade report with semantic five-element text colors."""
 
 from __future__ import annotations
 
@@ -12,29 +12,43 @@ from PIL import Image, ImageDraw, ImageFont
 
 try:
     from .corpus import ZhouyiCorpus
-    from .divination import LINE_NAMES, CastResult
-    from .najia import HexagramRelatives, relatives_for_bits
+    from .divination import CastResult
     from .paipan import beijing_time, chart_for
 except ImportError:  # pragma: no cover - direct local execution
     from corpus import ZhouyiCorpus
-    from divination import LINE_NAMES, CastResult
-    from najia import HexagramRelatives, relatives_for_bits
+    from divination import CastResult
     from paipan import beijing_time, chart_for
 
-
 WIDTH = 1240
-MARGIN = 64
-PAPER = "#F4E9D1"
-INK = "#25231F"
-MUTED = "#706657"
-ACCENT = "#8D2F23"
-JADE = "#294B3F"
-GOLD = "#B88A3B"
-PANEL = "#FBF5E7"
+MARGIN = 60
+PAPER = "#F6F3EA"
+INK = "#252C2A"
+MUTED = "#737971"
+ACCENT = "#B34F40"
+JADE = "#234A3B"
+PANEL = "#EAEEDF"
+RULE = "#D5DCCB"
+ELEMENT_COLORS = {
+    "木": "#317450",
+    "火": "#B54D3C",
+    "土": "#986039",
+    "金": "#80712E",
+    "水": "#3F6691",
+}
 LINE_LABELS = {1: "初爻", 2: "二爻", 3: "三爻", 4: "四爻", 5: "五爻", 6: "上爻"}
-BUNDLED_FONT_PATH = (
-    Path(__file__).resolve().parent / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"
-)
+TRIGRAM_IMAGES = {
+    "乾": "天",
+    "兑": "泽",
+    "离": "火",
+    "震": "雷",
+    "巽": "风",
+    "坎": "水",
+    "艮": "山",
+    "坤": "地",
+}
+FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+BUNDLED_FONT_PATH = FONT_DIR / "NotoSansCJKsc-Regular.otf"
+TITLE_FONT_PATH = FONT_DIR / "LiuyaoEditorialSerif.otf"
 
 
 class ChartRenderError(RuntimeError):
@@ -42,22 +56,35 @@ class ChartRenderError(RuntimeError):
 
 
 class LiuyaoImageRenderer:
-    """Draw a readable, self-contained 六爻 chart without network access."""
+    """Draw a self-contained report; no network access or five-element legend."""
 
-    def __init__(
-        self,
-        corpus: ZhouyiCorpus,
-        *,
-        font_path: str | Path | None = None,
-    ):
+    def __init__(self, corpus: ZhouyiCorpus, *, font_path: str | Path | None = None):
         self.corpus = corpus
-        custom_font = Path(font_path).expanduser() if font_path else None
-        if custom_font is not None and custom_font.is_file():
-            self._font_regular = custom_font
-            self._font_bold = custom_font
+        custom = Path(font_path).expanduser() if font_path else None
+        if custom is not None and custom.is_file():
+            self._font_regular = self._font_bold = custom
+            self._font_heading = custom
         else:
             self._font_regular = self._find_font(bold=False)
             self._font_bold = self._find_font(bold=True)
+            self._font_heading = TITLE_FONT_PATH if TITLE_FONT_PATH.is_file() else self._font_bold
+
+    def _heading(self, size: int) -> ImageFont.FreeTypeFont:
+        return ImageFont.truetype(str(self._font_heading), size=size)
+
+    @staticmethod
+    def _full_name(row: dict[str, Any]) -> str:
+        upper, lower = row["upper_trigram"], row["lower_trigram"]
+        upper = upper.translate(str.maketrans("兌離", "兑离"))
+        lower = lower.translate(str.maketrans("兌離", "兑离"))
+        if upper == lower:
+            return f"{upper}为{TRIGRAM_IMAGES[upper]}"
+        return TRIGRAM_IMAGES[upper] + TRIGRAM_IMAGES[lower] + row["name"]
+
+    @staticmethod
+    def _text(draw, x, y, text, font, color=INK):
+        # Top anchors make measured line heights independent of font ascenders.
+        draw.text((x, y), text, font=font, fill=color, anchor="lt")
 
     def render(
         self,
@@ -77,142 +104,132 @@ class LiuyaoImageRenderer:
     ) -> Path:
         primary = self.corpus.get(cast.primary_number)
         changed = self.corpus.get(cast.changed_number)
-        moving = cast.moving_lines
         chart = chart_for(cast, cast_at)
-        # The header and calculated pillars must refer to the same original instant.
-        if chart["calendar"].get("cast_at"):
-            cast_at = datetime.fromisoformat(chart["calendar"]["cast_at"])
-        elif cast_at is not None and cast_at.tzinfo is not None:
+        calendar = chart["calendar"]
+        if calendar.get("cast_at"):
+            cast_at = datetime.fromisoformat(calendar["cast_at"])
+        if cast_at is not None and cast_at.tzinfo is not None:
             cast_at = beijing_time(cast_at)
-        primary_relatives = relatives_for_bits(cast.primary_bits)
-        changed_relatives = relatives_for_bits(
-            cast.changed_bits,
-            reference_element=primary_relatives.palace_element,
-        )
-
-        fonts = {
-            "title": self._font(54, bold=True),
-            "subtitle": self._font(28),
-            "section": self._font(31, bold=True),
-            "body": self._font(25),
-            "small": self._font(21),
-            "tiny": self._font(18),
-            "line": self._font(23, bold=True),
-            "symbol": self._font(58),
+        f = {
+            "title": self._heading(76),
+            "name": self._heading(51),
+            "section": self._heading(35),
+            "pillar": self._heading(40),
+            "question": self._font(36),
+            "body": self._font(28),
+            "data": self._font(27),
+            "small": self._font(23),
+            "tiny": self._font(21),
         }
         measure = ImageDraw.Draw(Image.new("RGB", (WIDTH, 32), PAPER))
-        question_lines = self._wrap(
-            measure,
-            f"所问：{self._clean(question) or '未填写具体问题'}",
-            fonts["body"],
-            WIDTH - 2 * MARGIN - 48,
+
+        def wrap(text, font, width):
+            return self._wrap(measure, text, font, width)
+
+        question_lines = wrap(self._clean(question) or "未填写具体问题", f["question"], 992)
+        meta_lines = wrap(
+            f"{self._clean(intent_label) or '综合'} · {self._clean(method)}", f["small"], 992
         )
-        clean_comment = str(ai_comment or "").replace("\x00", "").strip()
-        comment_text = (
+        identity_lines = wrap(
+            f"{self._clean(caster_name) or '群友'} / QQ {self._clean(caster_id) or '未知'}"
+            f" / 群 {self._clean(group_id) or '未知'}",
+            f["small"],
+            992,
+        )
+        question_height = max(
+            108, len(question_lines) * 50 + (len(meta_lines) + len(identity_lines)) * 34 + 28
+        )
+        date_lines = (
+            []
+            if calendar["status"] == "已计算"
+            else wrap("日月干支 / 旬空 / 六神" + calendar["status"], f["small"], 1064)
+        )
+        calendar_height = 162 if not date_lines else 56 + len(date_lines) * 34
+        details = [
+            (label, wrap(value, f["body"], 876))
+            for label, value in self._detail_rows(primary, changed, cast)
+        ]
+        details_height = 76 + sum(max(1, len(lines)) * 40 + 24 for _, lines in details)
+        comment_lines = wrap(
             f"{self._clean(agent_name) or 'AI助手'}："
-            f"{clean_comment or '卦象已成，当察动静、辨时位而取其宜。'}"
+            + (
+                str(ai_comment or "").replace("\x00", "").strip()
+                or "卦象已成，当察动静、辨时位而取其宜。"
+            ),
+            f["body"],
+            1064,
         )
-        comment_lines = self._wrap(
-            measure,
-            comment_text,
-            fonts["body"],
-            WIDTH - 2 * MARGIN - 176,
+        comment_heading = wrap(self._clean(comment_title) or "排盘提示", f["body"], 1064)
+        comment_height = 48 + len(comment_heading) * 40 + len(comment_lines) * 40
+        # Each section owns its measured height. Long questions/射覆分析 grow the canvas.
+        height = (
+            308 + question_height + calendar_height + 606 + details_height + comment_height + 94
         )
-        calendar = chart["calendar"]
-        detail_rows = [("排盘口径", calendar["rule"])]
-        if calendar["status"] == "已计算":
-            detail_rows.append(
-                (
-                    "干支",
-                    f"{calendar['year']}年 {calendar['month']}月 {calendar['day']}日 "
-                    f"{calendar['hour']}时；月建 {calendar['month_branch']}；"
-                    f"日辰 {calendar['day_branch']}；{calendar['xun']}旬，"
-                    f"旬空 {calendar['xun_kong']}",
-                )
-            )
-        else:
-            detail_rows.append(("日月干支/旬空/六神", calendar["status"]))
-        detail_rows.append(
-            (
-                "世应与伏神",
-                f"世在{chart['shi']}爻、应在{chart['ying']}爻；"
-                "伏神按本卦缺失六亲取本宫首卦候选，不等于已选用神",
-            )
-        )
-        detail_rows.extend(self._detail_rows(primary, changed, cast))
-        detail_lines: list[tuple[str, bool]] = []
-        for label, value in detail_rows:
-            wrapped = self._wrap(
-                measure,
-                f"{label}：{value}",
-                fonts["body"],
-                WIDTH - 2 * MARGIN - 48,
-            )
-            detail_lines.extend((line, index == 0) for index, line in enumerate(wrapped))
-
-        meta_height = 196 + max(1, len(question_lines)) * 38
-        comment_height = 96 + max(1, len(comment_lines)) * 38
-        diagram_height = 620
-        details_height = 112 + len(detail_lines) * 39
-        canvas_height = 156 + meta_height + comment_height + diagram_height + details_height + 100
-        canvas = Image.new("RGB", (WIDTH, canvas_height), PAPER)
+        canvas = Image.new("RGB", (WIDTH, height), PAPER)
         draw = ImageDraw.Draw(canvas)
-        self._draw_background(draw, canvas_height)
-
-        y = self._draw_header(draw, primary, changed, moving, cast_at, fonts)
-        y = self._draw_meta(
-            draw,
-            y,
-            meta_height,
-            caster_name=caster_name,
-            caster_id=caster_id,
-            group_id=group_id,
-            intent_label=intent_label,
-            method=method,
-            question_lines=question_lines,
-            fonts=fonts,
+        self._draw_header(draw, primary, changed, cast, chart, cast_at, f)
+        y = 308
+        draw.rounded_rectangle(
+            (MARGIN, y, MARGIN + 78, y + question_height - 22), radius=6, fill=JADE
         )
-        y = self._draw_ai_comment(
-            draw,
-            y,
-            comment_height,
-            comment_lines,
-            comment_title,
-            fonts,
+        self._text(draw, MARGIN + 19, y + 20, "问", f["section"], PAPER)
+        self._text(draw, MARGIN + 19, y + 66, "卦", f["section"], PAPER)
+        text_y = y + 2
+        for line in question_lines:
+            self._text(draw, 166, text_y, line, f["question"], JADE)
+            text_y += 50
+        for line in meta_lines:
+            self._text(draw, 166, text_y + 5, line, f["small"])
+            text_y += 34
+        for line in identity_lines:
+            self._text(draw, 166, text_y + 5, line, f["small"], MUTED)
+            text_y += 34
+        y += question_height
+        self._draw_calendar(draw, y, calendar_height, calendar, date_lines, f)
+        y += calendar_height
+        self._draw_chart(draw, y, cast, chart, f)
+        y += 606
+        self._section_heading(draw, y, "卦辞与动爻", f)
+        text_y = y + 76
+        for label, lines in details:
+            row_height = len(lines) * 40 + 24
+            if label.startswith("动爻") or label == "全爻皆变":
+                draw.rectangle((MARGIN, text_y - 10, 286, text_y + row_height - 12), fill="#F5E8DF")
+            self._text(
+                draw,
+                MARGIN + 16,
+                text_y,
+                label,
+                f["small"],
+                ACCENT if label.startswith("动爻") else JADE,
+            )
+            for index, line in enumerate(lines):
+                self._text(draw, 304, text_y + index * 40, line, f["body"])
+            draw.line(
+                (MARGIN, text_y + row_height - 12, WIDTH - MARGIN, text_y + row_height - 12),
+                fill=RULE,
+                width=1,
+            )
+            text_y += row_height
+        y += details_height
+        draw.rounded_rectangle(
+            (MARGIN, y, WIDTH - MARGIN, y + comment_height),
+            radius=8,
+            fill=PANEL,
+            outline=RULE,
+            width=1,
         )
-        y = self._draw_diagram(
-            draw,
-            y,
-            diagram_height,
-            cast,
-            primary,
-            changed,
-            primary_relatives,
-            changed_relatives,
-            fonts,
-            chart,
-        )
-        y = self._draw_details(
-            draw,
-            y,
-            details_height,
-            detail_lines,
-            fonts,
-        )
-        draw.text(
-            (MARGIN, y + 28),
-            "六爻纳甲 · 以象明理 · 以变察时",
-            font=fonts["small"],
-            fill=MUTED,
-        )
-        draw.text(
-            (WIDTH - MARGIN, y + 28),
-            "六爻排盘",
-            font=fonts["small"],
-            fill=MUTED,
-            anchor="ra",
-        )
-
+        text_y = y + 24
+        for line in comment_heading:
+            self._text(draw, MARGIN + 28, text_y, line, f["body"], JADE)
+            text_y += 40
+        for line in comment_lines:
+            self._text(draw, MARGIN + 28, text_y, line, f["body"])
+            text_y += 40
+        y += comment_height + 30
+        footer = "北京时间 · 立春换年 · 节气换月 · 零点换日"
+        x = (WIDTH - draw.textlength(footer, font=f["tiny"])) / 2
+        self._text(draw, x, y, footer, f["tiny"], MUTED)
         path = self._output_path(output_path)
         try:
             canvas.save(path, "PNG", optimize=True)
@@ -221,308 +238,185 @@ class LiuyaoImageRenderer:
             raise ChartRenderError(f"保存六爻信息图失败：{exc}") from exc
         return path
 
-    @staticmethod
-    def _draw_background(draw: ImageDraw.ImageDraw, height: int) -> None:
-        draw.rectangle((0, 0, WIDTH, height), fill=PAPER)
-        for y in range(0, height, 72):
-            shade = "#E9D9B9" if (y // 72) % 2 == 0 else "#EFE1C6"
-            draw.line((0, y, WIDTH, y), fill=shade, width=1)
-        draw.rectangle((18, 18, WIDTH - 18, height - 18), outline=GOLD, width=2)
-
-    def _draw_header(
-        self,
-        draw: ImageDraw.ImageDraw,
-        primary: dict[str, Any],
-        changed: dict[str, Any],
-        moving: tuple[int, ...],
-        cast_at: datetime | None,
-        fonts: dict[str, ImageFont.FreeTypeFont],
-    ) -> int:
-        draw.rounded_rectangle(
-            (32, 24, WIDTH - 32, 144),
-            radius=24,
-            fill=JADE,
-        )
-        draw.text((MARGIN, 46), "六爻排盘", font=fonts["title"], fill="#FFF8E8")
-        transition = (
-            f"本卦 {primary['name']}  →  之卦 {changed['name']}"
-            if moving
-            else f"本卦 {primary['name']} · 静卦"
-        )
-        draw.text(
-            (WIDTH - MARGIN, 53),
-            transition,
-            font=fonts["subtitle"],
-            fill="#F1D59A",
-            anchor="ra",
-        )
-        draw.text(
-            (WIDTH - MARGIN, 98),
-            (
-                cast_at.strftime("%Y-%m-%d %H:%M:%S %Z")
-                + ("（时区未知）" if cast_at.tzinfo is None else "")
-            )
-            if cast_at is not None
-            else "原起卦时间未知",
-            font=fonts["small"],
-            fill="#D8DFD8",
-            anchor="ra",
-        )
-        return 164
-
-    def _draw_meta(
-        self,
-        draw: ImageDraw.ImageDraw,
-        y: int,
-        height: int,
-        *,
-        caster_name: str,
-        caster_id: str,
-        group_id: str,
-        intent_label: str,
-        method: str,
-        question_lines: list[str],
-        fonts: dict[str, ImageFont.FreeTypeFont],
-    ) -> int:
-        bottom = y + height - 16
-        draw.rounded_rectangle(
-            (MARGIN, y, WIDTH - MARGIN, bottom),
-            radius=20,
-            fill=PANEL,
-            outline="#D2BE98",
-            width=2,
-        )
-        left = MARGIN + 24
-        right = WIDTH // 2 + 12
-        safe_name = (self._clean(caster_name) or "群友")[:20]
-        safe_id = self._clean(caster_id) or "未知"
-        safe_group = self._clean(group_id) or "未知"
-        draw.text(
-            (left, y + 24),
-            f"起卦人：{safe_name}（QQ {safe_id}）",
-            font=fonts["body"],
-            fill=INK,
-        )
-        draw.text(
-            (right, y + 24),
-            f"群号：{safe_group}",
-            font=fonts["body"],
-            fill=INK,
-        )
-        draw.text(
-            (left, y + 68),
-            f"方向：{self._clean(intent_label) or '综合'}",
-            font=fonts["body"],
-            fill=INK,
-        )
-        draw.text(
-            (right, y + 68),
-            f"方式：{self._clean(method)}",
-            font=fonts["body"],
-            fill=INK,
-        )
-        question_y = y + 118
-        for line in question_lines:
-            draw.text((left, question_y), line, font=fonts["body"], fill=ACCENT)
-            question_y += 38
-        return y + height
-
-    def _draw_ai_comment(
-        self,
-        draw: ImageDraw.ImageDraw,
-        y: int,
-        height: int,
-        comment_lines: list[str],
-        comment_title: str,
-        fonts: dict[str, ImageFont.FreeTypeFont],
-    ) -> int:
-        top = y + 4
-        bottom = y + height - 16
-        draw.rounded_rectangle(
-            (MARGIN, top, WIDTH - MARGIN, bottom),
-            radius=20,
-            fill="#E7EFE8",
-            outline="#A9BDAF",
-            width=2,
-        )
-        draw.text(
-            (MARGIN + 24, top + 22),
-            self._clean(comment_title) or "排盘提示",
-            font=fonts["section"],
-            fill=JADE,
-        )
-        text_y = top + 70
-        for line in comment_lines:
-            draw.text(
-                (MARGIN + 24, text_y),
-                line,
-                font=fonts["body"],
-                fill=ACCENT,
-            )
-            text_y += 38
-        return y + height
-
-    def _draw_diagram(
-        self,
-        draw: ImageDraw.ImageDraw,
-        y: int,
-        height: int,
-        cast: CastResult,
-        primary: dict[str, Any],
-        changed: dict[str, Any],
-        primary_relatives: HexagramRelatives,
-        changed_relatives: HexagramRelatives,
-        fonts: dict[str, ImageFont.FreeTypeFont],
-        chart: dict[str, Any],
-    ) -> int:
-        top = y + 4
-        bottom = y + height - 16
-        draw.rounded_rectangle(
-            (MARGIN, top, WIDTH - MARGIN, bottom),
-            radius=20,
-            fill="#F8EFD9",
-            outline="#D2BE98",
-            width=2,
-        )
-
-        primary_title = f"本卦 · 第{primary['number']}卦 {primary['name']}"
-        changed_title = (
-            f"之卦 · 第{changed['number']}卦 {changed['name']}"
-            if cast.moving_lines
-            else "静卦 · 无动爻"
-        )
-        draw.text((176, top + 34), primary_title, font=fonts["subtitle"], fill=INK)
-        draw.text((728, top + 34), changed_title, font=fonts["subtitle"], fill=INK)
-        draw.text(
-            (176, top + 74),
-            (
-                f"{primary['upper_trigram']}上{primary['lower_trigram']}下 · "
-                f"{primary_relatives.palace}宫{primary_relatives.palace_element}"
-                f"（{primary_relatives.palace_stage}）"
-            ),
-            font=fonts["small"],
-            fill=MUTED,
-        )
-        changed_note = (
-            (
-                f"{changed['upper_trigram']}上{changed['lower_trigram']}下 · "
-                f"六亲从本卦{primary_relatives.palace}宫"
-                f"{primary_relatives.palace_element}"
-            )
-            if cast.moving_lines
-            else "本卦不变 · 六亲沿用本卦"
-        )
-        draw.text((728, top + 74), changed_note, font=fonts["small"], fill=MUTED)
-
-        first_y = top + 138
-        for row, position in enumerate(range(6, 0, -1)):
-            line_y = first_y + row * 72
-            facts = chart["primary"][position - 1]
-            changed_facts = chart["changed"][position - 1]
-            value = cast.lines[position - 1]
-            is_moving = value in {6, 9}
-            draw.text(
-                (MARGIN + 24, line_y - 12),
-                LINE_LABELS[position],
-                font=fonts["line"],
-                fill=ACCENT if is_moving else MUTED,
-            )
-            self._draw_line(
+    def _draw_header(self, draw, primary, changed, cast, chart, cast_at, f):
+        self._text(draw, MARGIN, 45, "六爻排盘", f["title"], JADE)
+        stamp = cast_at.strftime("%Y-%m-%d %H:%M:%S") if cast_at else "原起卦时间未知"
+        zone = "北京时间 UTC+8" if cast_at and cast_at.tzinfo else "原时间未注明时区"
+        for y, text in ((54, stamp), (92, zone)):
+            self._text(
                 draw,
-                176,
-                line_y,
-                cast.primary_bits[position - 1],
-                moving=is_moving,
+                WIDTH - MARGIN - draw.textlength(text, font=f["small"]),
+                y,
+                text,
+                f["small"],
+                MUTED,
             )
-            draw.text(
-                (430, line_y - 12),
-                (
-                    f"{value} {LINE_NAMES[value].replace('（动）', '')} · "
-                    f"{facts['relative']}{facts['stem']}{facts['branch']}{facts['element']}"
-                ),
-                font=fonts["small"],
-                fill=ACCENT if is_moving else INK,
-            )
-            self._draw_line(
+        title = self._full_name(primary)
+        title += " → " + self._full_name(changed) if cast.moving_lines else " · 静卦"
+        font = f["name"]
+        while draw.textlength(title, font=font) > WIDTH - MARGIN * 2:
+            font = self._heading(font.size - 1)
+        self._text(draw, MARGIN, 160, title, font)
+        self._text(
+            draw,
+            MARGIN,
+            241,
+            f"本卦 {primary['number']:02d} · {chart['palace']}宫{chart['palace_element']}"
+            f" · {chart['palace_stage']}",
+            f["body"],
+            JADE,
+        )
+        subtitle = (
+            f"之卦 {changed['number']:02d} · 六亲从本卦"
+            if cast.moving_lines
+            else "无动爻 · 以本卦为主"
+        )
+        self._text(
+            draw,
+            WIDTH - MARGIN - draw.textlength(subtitle, font=f["small"]),
+            245,
+            subtitle,
+            f["small"],
+            MUTED,
+        )
+        draw.line((MARGIN, 284, WIDTH - MARGIN, 284), fill="#9CAF9D", width=2)
+
+    def _draw_calendar(self, draw, y, height, calendar, missing_lines, f):
+        draw.rounded_rectangle(
+            (MARGIN, y, WIDTH - MARGIN, y + height - 48), radius=8, fill=PANEL, outline=RULE
+        )
+        if missing_lines:
+            for index, line in enumerate(missing_lines):
+                self._text(draw, MARGIN + 28, y + 18 + index * 34, line, f["small"], MUTED)
+            return
+        span = (WIDTH - 2 * MARGIN) / 4
+        for index, (key, label) in enumerate(
+            (("year", "年"), ("month", "月"), ("day", "日"), ("hour", "时"))
+        ):
+            center = MARGIN + span * (index + 0.5)
+            self._text(draw, center - 23, y + 14, label + "柱", f["small"], MUTED)
+            text = calendar[key] + label
+            self._text(
                 draw,
-                728,
-                line_y,
-                cast.changed_bits[position - 1],
-                moving=False,
+                center - draw.textlength(text, font=f["pillar"]) / 2,
+                y + 51,
+                text,
+                f["pillar"],
             )
-            draw.text(
-                (980, line_y - 12),
-                f"{changed_facts['relative']}{changed_facts['stem']}"
-                f"{changed_facts['branch']}{changed_facts['element']}",
-                font=fonts["small"],
-                fill=ACCENT if is_moving else MUTED,
+            if index:
+                draw.line((MARGIN + span * index, y + 24, MARGIN + span * index, y + 90), fill=RULE)
+        note = (
+            f"月建 {calendar['month_branch']} · 日辰 {calendar['day_branch']} · "
+            f"{calendar['xun']}旬 · 旬空 {calendar['xun_kong']}"
+        )
+        self._text(
+            draw, (WIDTH - draw.textlength(note, font=f["small"])) / 2, y + 130, note, f["small"]
+        )
+
+    def _draw_chart(self, draw, y, cast, chart, f):
+        edges = (MARGIN, 154, 264, 420, 756, 840, WIDTH - MARGIN)
+        draw.rounded_rectangle((MARGIN, y, WIDTH - MARGIN, y + 60), radius=7, fill=PANEL)
+        for index, label in enumerate(("爻位", "六神", "伏神", "本卦", "世应", "之卦")):
+            center = (edges[index] + edges[index + 1]) / 2
+            self._text(
+                draw,
+                center - draw.textlength(label, font=f["data"]) / 2,
+                y + 17,
+                label,
+                f["data"],
+                JADE,
             )
-            draw.text((MARGIN + 24, line_y + 17), facts["spirit"], font=fonts["tiny"], fill=MUTED)
-            hidden = facts["hidden"]
-            note = (facts["role"] + "爻") if facts["role"] else ""
-            if hidden:
-                note += (" · " if note else "") + "伏：" + hidden["label"]
-            draw.text((430, line_y + 17), note, font=fonts["tiny"], fill=JADE)
-            if is_moving:
-                marker = "○" if value == 9 else "×"
-                draw.text(
-                    (688, line_y - 16),
-                    marker,
-                    font=fonts["subtitle"],
-                    fill=ACCENT,
-                    anchor="ma",
+        for index, position in enumerate(range(6, 0, -1)):
+            top = y + 60 + index * 76
+            base = top + 24
+            line = chart["primary"][position - 1]
+            changed = chart["changed"][position - 1]
+            moving = position in cast.moving_lines
+            if moving:
+                draw.rectangle((MARGIN, top, WIDTH - MARGIN, top + 76), fill="#F6EAE3")
+                draw.rectangle((MARGIN, top, MARGIN + 4, top + 76), fill=ACCENT)
+            self._text(draw, 78, base, LINE_LABELS[position], f["data"])
+            self._text(draw, 177, base, line["spirit"], f["data"])
+            hidden = line["hidden"]
+            self._text(
+                draw,
+                278 if hidden else 327,
+                base,
+                hidden["label"] if hidden else "—",
+                f["data"],
+                ELEMENT_COLORS.get(hidden["element"], INK) if hidden else MUTED,
+            )
+            self._draw_line(draw, 438, base + 6, cast.primary_bits[position - 1])
+            self._text(
+                draw,
+                533,
+                base,
+                self._line_label(line),
+                f["data"],
+                ELEMENT_COLORS.get(line["element"], INK),
+            )
+            if moving:
+                self._text(
+                    draw,
+                    727,
+                    base - 1,
+                    "○" if cast.lines[position - 1] == 9 else "×",
+                    f["data"],
+                    ACCENT,
                 )
-        return y + height
-
-    def _draw_details(
-        self,
-        draw: ImageDraw.ImageDraw,
-        y: int,
-        height: int,
-        detail_lines: list[tuple[str, bool]],
-        fonts: dict[str, ImageFont.FreeTypeFont],
-    ) -> int:
-        top = y + 4
-        bottom = y + height - 16
-        draw.rounded_rectangle(
-            (MARGIN, top, WIDTH - MARGIN, bottom),
-            radius=20,
-            fill=PANEL,
-            outline="#D2BE98",
-            width=2,
-        )
-        draw.text(
-            (MARGIN + 24, top + 22),
-            "卦辞与动爻",
-            font=fonts["section"],
-            fill=JADE,
-        )
-        text_y = top + 76
-        for line, starts_row in detail_lines:
-            draw.text(
-                (MARGIN + 24, text_y),
-                line,
-                font=fonts["body"],
-                fill=ACCENT if starts_row and line.startswith("动爻") else INK,
+            if line["role"]:
+                draw.rounded_rectangle((780, base - 6, 816, base + 35), radius=4, fill=JADE)
+                self._text(draw, 784, base - 1, line["role"], f["data"], PAPER)
+            else:
+                self._text(draw, 785, base, "—", f["data"], MUTED)
+            self._draw_line(draw, 860, base + 6, cast.changed_bits[position - 1])
+            self._text(
+                draw,
+                958,
+                base,
+                self._line_label(changed),
+                f["data"],
+                ELEMENT_COLORS.get(changed["element"], INK),
             )
-            text_y += 39
-        return y + height
+            draw.line((MARGIN, top + 76, WIDTH - MARGIN, top + 76), fill=RULE)
+        for edge in edges:
+            draw.line((edge, y + 7, edge, y + 516), fill=RULE)
+        numbers = "一二三四五六"
+        active = (
+            "、".join(LINE_LABELS[p] for p in cast.moving_lines) + "发动"
+            if cast.moving_lines
+            else "无动爻"
+        )
+        note = f"世{numbers[chart['shi'] - 1]}应{numbers[chart['ying'] - 1]} · {active}"
+        self._text(draw, MARGIN + 8, y + 538, note, f["small"])
+        self._text(draw, MARGIN + 8, y + 575, "伏神按缺失六亲列候选", f["tiny"], MUTED)
+        values = "六爻值（初→上）：" + " ".join(map(str, cast.lines))
+        self._text(
+            draw,
+            WIDTH - MARGIN - draw.textlength(values, font=f["tiny"]),
+            y + 575,
+            values,
+            f["tiny"],
+            MUTED,
+        )
 
     @staticmethod
-    def _draw_line(
-        draw: ImageDraw.ImageDraw,
-        x: int,
-        y: int,
-        bit: int,
-        *,
-        moving: bool,
-    ) -> None:
-        color = ACCENT if moving else INK
+    def _line_label(line):
+        return f"{line['relative']}{line['stem']}{line['branch']}{line['element']}"
+
+    @staticmethod
+    def _draw_line(draw, x, y, bit):
         if bit:
-            draw.rounded_rectangle((x, y, x + 224, y + 18), radius=4, fill=color)
+            draw.rectangle((x, y, x + 78, y + 16), fill=INK)
         else:
-            draw.rounded_rectangle((x, y, x + 94, y + 18), radius=4, fill=color)
-            draw.rounded_rectangle((x + 130, y, x + 224, y + 18), radius=4, fill=color)
+            draw.rectangle((x, y, x + 31, y + 16), fill=INK)
+            draw.rectangle((x + 47, y, x + 78, y + 16), fill=INK)
+
+    def _section_heading(self, draw, y, title, f):
+        draw.rectangle((MARGIN, y + 15, MARGIN + 5, y + 47), fill=JADE)
+        self._text(draw, MARGIN + 24, y + 12, title, f["section"], JADE)
+        end = MARGIN + 48 + draw.textlength(title, font=f["section"])
+        draw.line((end, y + 34, WIDTH - MARGIN, y + 34), fill="#9CAF9D")
 
     def _detail_rows(
         self,
