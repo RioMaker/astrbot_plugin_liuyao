@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from corpus import ZhouyiCorpus  # noqa: E402
 from divination import CastResult  # noqa: E402
-from renderer import ELEMENT_COLORS, LiuyaoImageRenderer  # noqa: E402
+from renderer import ELEMENT_COLORS, INK, SPIRIT_COLORS, LiuyaoImageRenderer  # noqa: E402
 
 
 def test_renderer_creates_detailed_png(tmp_path) -> None:
@@ -103,6 +103,13 @@ def test_element_colors_survive_moving_line_highlight_without_legend(tmp_path, m
     assert ("父母丙辰土", ELEMENT_COLORS["土"]) in drawn
     assert ("妻财寅木", ELEMENT_COLORS["木"]) in drawn
     assert ("子孙己亥水", ELEMENT_COLORS["水"]) in drawn
+    # A pillar may contain two different elements; its date suffix stays neutral.
+    assert ("庚", ELEMENT_COLORS["金"]) in drawn
+    assert ("午", ELEMENT_COLORS["火"]) in drawn
+    assert ("己", ELEMENT_COLORS["土"]) in drawn
+    assert ("酉", ELEMENT_COLORS["金"]) in drawn
+    assert ("年", INK) in drawn and ("时", INK) in drawn
+    assert all((spirit, color) in drawn for spirit, color in SPIRIT_COLORS.items())
     assert not any(text in ELEMENT_COLORS for text, _ in drawn)
 
 

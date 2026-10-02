@@ -241,7 +241,7 @@ def test_renderer_shows_snapshot_pillars_and_original_beijing_time(tmp_path, mon
         cast_at=AT + timedelta(days=40),
         output_path=tmp_path / "chart.png",
     )
-    text = "\n".join(drawn)
+    text = "".join(drawn)
     assert "2026-10-02 12:00:00" in text and "己酉日" in text
     assert "旬空 寅卯" in text and "螣蛇" in text
     assert "世" in drawn and "应" in drawn

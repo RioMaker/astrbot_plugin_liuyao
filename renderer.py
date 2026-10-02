@@ -8,15 +8,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 try:
     from .corpus import ZhouyiCorpus
     from .divination import CastResult
+    from .najia import BRANCH_ELEMENTS
     from .paipan import beijing_time, chart_for
 except ImportError:  # pragma: no cover - direct local execution
     from corpus import ZhouyiCorpus
     from divination import CastResult
+    from najia import BRANCH_ELEMENTS
     from paipan import beijing_time, chart_for
 
 WIDTH = 1240
@@ -35,6 +37,29 @@ ELEMENT_COLORS = {
     "金": "#80712E",
     "水": "#3F6691",
 }
+GANZHI_ELEMENTS = {
+    **BRANCH_ELEMENTS,
+    **{
+        stem: element
+        for stems, element in (
+            ("甲乙", "木"),
+            ("丙丁", "火"),
+            ("戊己", "土"),
+            ("庚辛", "金"),
+            ("壬癸", "水"),
+        )
+        for stem in stems
+    },
+}
+# Distinct decorative colors; the silver-gray tiger stays readable on ivory.
+SPIRIT_COLORS = {
+    "青龙": ELEMENT_COLORS["木"],
+    "朱雀": ELEMENT_COLORS["火"],
+    "勾陈": ELEMENT_COLORS["土"],
+    "螣蛇": "#92712E",
+    "白虎": "#667078",
+    "玄武": "#395665",
+}
 LINE_LABELS = {1: "初爻", 2: "二爻", 3: "三爻", 4: "四爻", 5: "五爻", 6: "上爻"}
 TRIGRAM_IMAGES = {
     "乾": "天",
@@ -49,6 +74,7 @@ TRIGRAM_IMAGES = {
 FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
 BUNDLED_FONT_PATH = FONT_DIR / "NotoSansCJKsc-Regular.otf"
 TITLE_FONT_PATH = FONT_DIR / "LiuyaoEditorialSerif.otf"
+BAMBOO_PATH = FONT_DIR.parent / "bamboo.png"
 
 
 class ChartRenderError(RuntimeError):
@@ -85,6 +111,46 @@ class LiuyaoImageRenderer:
     def _text(draw, x, y, text, font, color=INK):
         # Top anchors make measured line heights independent of font ascenders.
         draw.text((x, y), text, font=font, fill=color, anchor="lt")
+
+    @staticmethod
+    def _ganzhi_runs(text):
+        return [(char, ELEMENT_COLORS.get(GANZHI_ELEMENTS.get(char), INK)) for char in text]
+
+    @staticmethod
+    def _colored_text(draw, x, y, runs, font):
+        # Share a baseline so splitting a pillar into colors does not shift glyphs vertically.
+        full_text = "".join(text for text, _ in runs)
+        top = font.getbbox(full_text, anchor="la")[1]
+        for text, color in runs:
+            draw.text((x, y - top), text, font=font, fill=color, anchor="la")
+            x += draw.textlength(text, font=font)
+
+    @staticmethod
+    def _draw_background(canvas):
+        try:
+            with Image.open(BAMBOO_PATH) as source:
+                bamboo = source.convert("RGBA")
+        except OSError:
+            # Decoration must not prevent a chart from being sent.
+            return
+        for width, x, y, mirror, opacity in (
+            (820, WIDTH - 820, 0, False, 0.08),
+            (610, -140, canvas.height - 915, True, 0.05),
+        ):
+            motif = bamboo.resize(
+                (width, round(bamboo.height * width / bamboo.width)), Image.Resampling.LANCZOS
+            )
+            if mirror:
+                motif = motif.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            # Multiply the original alpha; transparent negative space remains transparent.
+            alpha = motif.getchannel("A").point([round(value * opacity) for value in range(256)])
+            fade = Image.new("L", motif.size, 255)
+            fade_draw = ImageDraw.Draw(fade)
+            for offset in range(120):
+                row = motif.height - 120 + offset
+                fade_draw.line((0, row, width, row), fill=round(255 * (119 - offset) / 119))
+            alpha = ImageChops.multiply(alpha, fade)
+            canvas.paste(motif, (x, y), alpha)
 
     def render(
         self,
@@ -166,6 +232,7 @@ class LiuyaoImageRenderer:
             308 + question_height + calendar_height + 606 + details_height + comment_height + 94
         )
         canvas = Image.new("RGB", (WIDTH, height), PAPER)
+        self._draw_background(canvas)
         draw = ImageDraw.Draw(canvas)
         self._draw_header(draw, primary, changed, cast, chart, cast_at, f)
         y = 308
@@ -296,21 +363,22 @@ class LiuyaoImageRenderer:
             center = MARGIN + span * (index + 0.5)
             self._text(draw, center - 23, y + 14, label + "柱", f["small"], MUTED)
             text = calendar[key] + label
-            self._text(
+            self._colored_text(
                 draw,
                 center - draw.textlength(text, font=f["pillar"]) / 2,
                 y + 51,
-                text,
+                self._ganzhi_runs(text),
                 f["pillar"],
             )
             if index:
                 draw.line((MARGIN + span * index, y + 24, MARGIN + span * index, y + 90), fill=RULE)
-        note = (
-            f"月建 {calendar['month_branch']} · 日辰 {calendar['day_branch']} · "
-            f"{calendar['xun']}旬 · 旬空 {calendar['xun_kong']}"
-        )
-        self._text(
-            draw, (WIDTH - draw.textlength(note, font=f["small"])) / 2, y + 130, note, f["small"]
+        runs = [("月建 ", INK)] + self._ganzhi_runs(calendar["month_branch"])
+        runs += [(" · 日辰 ", INK)] + self._ganzhi_runs(calendar["day_branch"])
+        runs += [(" · ", INK)] + self._ganzhi_runs(calendar["xun"])
+        runs += [("旬 · 旬空 ", INK)] + self._ganzhi_runs(calendar["xun_kong"])
+        note = "".join(text for text, _ in runs)
+        self._colored_text(
+            draw, (WIDTH - draw.textlength(note, font=f["small"])) / 2, y + 130, runs, f["small"]
         )
 
     def _draw_chart(self, draw, y, cast, chart, f):
@@ -336,7 +404,9 @@ class LiuyaoImageRenderer:
                 draw.rectangle((MARGIN, top, WIDTH - MARGIN, top + 76), fill="#F6EAE3")
                 draw.rectangle((MARGIN, top, MARGIN + 4, top + 76), fill=ACCENT)
             self._text(draw, 78, base, LINE_LABELS[position], f["data"])
-            self._text(draw, 177, base, line["spirit"], f["data"])
+            self._text(
+                draw, 177, base, line["spirit"], f["data"], SPIRIT_COLORS.get(line["spirit"], MUTED)
+            )
             hidden = line["hidden"]
             self._text(
                 draw,
