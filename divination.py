@@ -88,7 +88,6 @@ class CastResult:
     lines: tuple[int, int, int, int, int, int]
     cast_at: datetime | None = field(default=None, compare=False)
     chart: dict | None = field(default=None, compare=False)
-    cast_id: str = field(default="", compare=False)
 
     def __post_init__(self) -> None:
         if len(self.lines) != 6 or any(value not in LINE_NAMES for value in self.lines):

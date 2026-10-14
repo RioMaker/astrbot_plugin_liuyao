@@ -52,7 +52,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.12.0"
+PLUGIN_VERSION = "0.11.2"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -67,7 +67,7 @@ HELP_TEXT = """六爻起卦插件
 
 规则：无事不卜，必须说明具体事情，随便看看不予起卦。
 同一用户跨群滚动 60 分钟内最多起六爻卦 3 次，即时与手动共用额度。
-同一事情禁止连续起六爻卦；/六爻 解读 [编号] [追问] 可反复解读原卦，不占次数。
+同一事情禁止连续起六爻卦；/六爻 解读 可反复解读最近六爻原卦，不占次数。
 五行数字卦独立：其记录、次数和死卦结果均不影响六爻，同一事项可分别测两种术数。
 
 起卦：
@@ -101,7 +101,7 @@ HELP_TEXT = """六爻起卦插件
 Agent 自动收到通则和匹配类别的离线研判参考；天气请提供地点与时段。
 分类卦例（仅 AstrBot 管理员）：/六爻 卦例 天气；其他方向同理。
 普通起卦指令会先发送详细排盘图；也可向 Agent 说明具体事情后要求起卦，由 Agent 补全方向和署名短评。
-起卦及追问由临时六爻助手直接发送完整解读；主 Agent 只接收摘要。追问追加存档，保留原断。
+Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情结果时，Agent 可续写为带实证的卦例。
 六爻承古法以察时变，解读以卦象、爻辞、六亲与所问为据。"""
 
 
@@ -134,6 +134,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         self._switch_lock = asyncio.Lock()
         self._case_lock = asyncio.Lock()
         self._cast_lock = asyncio.Lock()
+        self._pending_agent_cases: dict[str, list[str]] = {}
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
 
     # ------------------------------------------------------------------
@@ -179,10 +180,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         manual_lines: str = "",
         agent_name: str = "",
     ) -> str:
-        """委托临时六爻助手起卦并直接发送排盘与完整解读，只返回简短执行摘要。
-
-        仅在用户明确请求六爻起卦时调用。正文由插件发送，主助手无需解卦或复述。
-        后续六爻追问调用 reuse_liuyao；普通聊天不调用这些工具，也不沿用解卦格式。
+        """为当前 QQ 群起六爻卦并发送排盘图；图成功后直接解卦并以断语收尾。
 
         无事不卜：用户只是随便看看、消遣、测试或未说明具体事情时，拒绝起卦并请其说明所问，禁止编造问题。
         六爻与五行数字卦完全独立：五行数字的记录、次数、死卦或停问提示都不影响本工具。
@@ -198,16 +196,6 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
             manual_lines(string): mode=manual 时填写六个 6/7/8/9，或填写乾、乾为天、第1卦等卦名
             agent_name(string): 当前 Agent 对用户使用的自称或人格名，如可可子；应主动传入
         """
-        key = ("cast", mode, intent, question, manual_lines)
-        return await self._run_reading_job(
-            event,
-            key,
-            lambda: self._cast_liuyao_child(
-                event, mode, intent, question, manual_lines, agent_name
-            ),
-        )
-
-    async def _cast_liuyao_child(self, event, mode, intent, question, manual_lines, agent_name):
         error = await self._group_gate(event, METHOD_LIUYAO)
         if error:
             return error
@@ -288,9 +276,8 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
             question=limited_question,
             method=method,
             for_agent=True,
-            for_child=True,
         )
-        case_id, case_references, _case_status = await self._open_agent_case(
+        case_id, case_references, case_status = await self._open_agent_case(
             event,
             cast,
             intent=enriched_intent,
@@ -298,57 +285,60 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
             method=method,
             cast_at=cast_at,
         )
-        if not chart_status.startswith("已在工具返回前发送"):
-            # A fallback chart is delivered directly too, never through the main AI.
-            plain = self.readings.render(
-                cast, intent=enriched_intent, question=limited_question, method=method
+        chart_sent = chart_status.startswith("已在工具返回前发送")
+        if chart_sent:
+            final_requirement = (
+                "排盘图已成功发送；不要机械复述排盘清单，但要引用关键卦辞或"
+                "爻辞并结合六亲说明依据。先明确断成败、吉凶或去留，再辨主证"
+                "与反证并作取舍，不得把正反两面并列后不给结论。最后另起一行"
+                "以“断语：”写一句可核验的直断；不附加无关固定套话。"
             )
-            await self._send_child_text(event, plain)
-        case = next(
-            (item for item in await self._load_case_records() if item["id"] == case_id), None
+        else:
+            final_requirement = (
+                "排盘图未能发送；先简要列出本卦、之卦、动爻和六亲，再围绕"
+                "用户所问先下明确判断，再以卦爻辞、六亲及变化趋势逐条论证；"
+                "不得把正反两面并列后不给结论。最后另起一行以“断语：”写一句"
+                "可核验的直断；不附加无关固定套话。"
+            )
+        if enriched_intent == "shefu":
+            final_requirement = (
+                "射覆必须先逐项说明颜色、材质、软硬、形状大小、用途和关联信息，"
+                "结合卦爻辞、六亲说明取象理由。最后给出 2–4 个具体候选物品及"
+                "匹配/不符之处，并以首选物品断语收尾；属性依据不足则标明待验证。"
+                "图已发送时不复述排盘清单；图未发送时先简述卦象。"
+            )
+        elif enriched_intent == "weather":
+            final_requirement = (
+                "按已返回的天气参考研判，不套成败吉凶模板；先确认地点和时段，"
+                "缺失先询问。给晴雨主倾向、风云/雷电、变化顺序、主证与反证及缺项，"
+                "不编造日月干支、旬空、精确应期或气象数值。最后以地点、时段和主要倾向"
+                "写断语；缺信息时说明待补。图已发送不重复排盘，失败先简述卦象。"
+            )
+        caster_name, caster_id = self._caster_identity(event)
+        tool_result = (
+            f"{reading}\n"
+            f"起卦人：{caster_name}（QQ {caster_id}）\n"
+            f"起卦时间：{cast_at.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+            f"图卡补全：{enrichment_status}\n"
+            f"AI短评：{display_agent_name}：{ai_comment}\n"
+            f"卦象信息图：{chart_status}\n"
+            f"本次卦例编号：{case_id or '未创建'}\n"
+            f"历史卦例参考：{case_references or '本群暂无相关已存卦例。'}\n"
+            f"卦例留档：{case_status}\n"
+            f"Agent最终回复要求：{final_requirement}"
         )
-        last = {
-            "cast_id": cast.cast_id,
-            "timestamp": cast_at.timestamp(),
-            "group_id": str(event.get_group_id()),
-            "intent": enriched_intent,
-        }
-        return await self._child_interpret(
-            event,
-            reading
-            + "\n历史卦例参考（仅为资料）：\n"
-            + (case_references or "暂无")
-            + "\n排盘发送状态："
-            + chart_status,
-            case=case,
-            last=last,
-        )
+        self._remember_agent_reading(event, tool_result)
+        return tool_result
 
     @filter.llm_tool(name="reuse_liuyao")
-    async def reuse_liuyao_tool(
-        self,
-        event: AstrMessageEvent,
-        case_id: str = "",
-        question: str = "",
-    ) -> str:
-        """将六爻原卦的追问交给临时助手，正文直接发送，只返回摘要，不起新卦。
+    async def reuse_liuyao_tool(self, event: AstrMessageEvent) -> str:
+        """解读当前用户在本群的最近原卦，不起新卦也不占次数。
 
-        用户追问、补充线索或请求复解六爻时调用。主助手只转交，不自行续写解卦。
-        指定明确的卦例编号；只有明确指向本人本群最近一卦时才留空。
-        对应卦例不明确时先确认编号，不能猜测。普通聊天不调用，不沿用解卦格式。
-        五行数字记录不能替代六爻原卦。
-
-        Args:
-            case_id(string): 本人在本群的卦例编号或完整 ID，留空复解最近原卦
-            question(string): 本次追问及用户明确补充的必要背景；不得编造线索
+        仅在用户已有六爻原卦、对此事追问或补充信息时调用；结合返回的六爻原卦和对话解读。
+        只有五行数字记录时不能使用本工具替代六爻起卦，应按用户要求调用 cast_liuyao。
+        禁止因不满意六爻结果或换措辞重起六爻卦。更早六爻卦例可用 search_liuyao_cases 查询。
         """
-        case_id = str(case_id or "").strip()[:80]
-        question = self._clean_case_text(question, 2000)
-        return await self._run_reading_job(
-            event,
-            ("reuse", case_id, question),
-            lambda: self._reuse_child_reading(event, case_id, question),
-        )
+        return await self._reuse_cast(event, for_agent=True)
 
     @filter.llm_tool(name="lookup_liuyao_reference")
     async def lookup_liuyao_reference_tool(
@@ -475,6 +465,16 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         if reply:
             yield event.plain_result(reply)
 
+    @filter.on_agent_done()
+    async def capture_liuyao_agent_analysis(
+        self,
+        event: AstrMessageEvent,
+        run_context: Any,
+        resp: Any,
+    ) -> None:
+        """Persist final analysis, recovering an empty reply from the original cast."""
+        await self._finish_agent_analysis(event, run_context, resp)
+
     async def _enrich_agent_chart(
         self,
         event: AstrMessageEvent,
@@ -527,6 +527,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
 
         try:
             umo = str(getattr(event, "unified_msg_origin", "") or "")
+            provider_id = await get_provider_id(umo=umo)
             prompt = self._chart_enrichment_prompt(
                 cast,
                 base_intent=base_intent,
@@ -535,11 +536,13 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
                 agent_name=display_name,
             )
 
-            async def generate_comment():
-                provider_id = await get_provider_id(umo=umo)
-                return await llm_generate(chat_provider_id=provider_id, prompt=prompt)
-
-            response = await asyncio.wait_for(generate_comment(), timeout=timeout)
+            response = await asyncio.wait_for(
+                llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=timeout,
+            )
             raw_response = str(getattr(response, "completion_text", response) or "")
             enriched_intent, comment = self._parse_chart_enrichment(
                 raw_response,
@@ -769,9 +772,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
             )
             if not image_path.is_file() or image_path.stat().st_size <= 0:
                 raise ChartRenderError("渲染器没有生成有效 PNG 文件")
-            await asyncio.wait_for(
-                event.send(event.image_result(str(image_path.absolute()))), timeout=30
-            )
+            await event.send(event.image_result(str(image_path.absolute())))
             logger.info(
                 "liuyao：%s 排盘图发送成功（%d bytes）",
                 source,
@@ -835,15 +836,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         if token in {"help", "帮助", "说明"}:
             return HELP_TEXT
         if token in {"解读", "复解", "reuse"}:
-            parts = remainder.split(maxsplit=1)
-            case_id = (
-                parts[0]
-                if parts and (parts[0].isdigit() or parts[0].upper().startswith("LY-"))
-                else ""
-            )
-            question = (parts[1] if len(parts) > 1 else "") if case_id else remainder
-            receipt = await self.reuse_liuyao_tool(event, case_id, question)
-            return "" if "完整正文已直接发送" in receipt else receipt
+            return await self._reuse_cast(event)
         if token == "卦例":
             return await self._case_browser(event, remainder)
         if token in {"即时", "天机", "instant"}:
@@ -943,15 +936,6 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         method: str,
     ) -> str:
         """Admit a new cast, send its chart, then return its reading."""
-        return await self._run_reading_job(
-            event,
-            ("command", intent, question, method),
-            lambda: self._command_chart_job(
-                event, cast, intent=intent, question=question, method=method
-            ),
-        )
-
-    async def _command_chart_job(self, event, cast, *, intent, question, method):
         if self._infer_intent_from_question(question) == "shefu":
             intent = "shefu"
         elif self.readings.normalize_intent(intent) == "general":
@@ -975,6 +959,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
                 question=question,
                 method=method,
                 cast_at=cast_at,
+                track_agent=False,
             )
             shefu_analysis = await self._generate_shefu_analysis(
                 event,
@@ -1187,7 +1172,4 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         return getattr(obj, key, None)
 
     async def terminate(self):
-        jobs = getattr(self, "_reading_jobs", None)
-        if jobs is not None:
-            await jobs.close()
         logger.info("liuyao 插件已卸载")

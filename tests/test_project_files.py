@@ -15,10 +15,6 @@ def test_configuration_and_metadata_contract() -> None:
     assert config["agent_generate_chart_comment"]["default"] is True
     assert config["agent_display_name"]["default"] == "AI助手"
     assert config["agent_comment_timeout_seconds"]["default"] == 45
-    assert config["agent_analysis_timeout_seconds"]["default"] == 90
-    assert config["subai_max_concurrency"]["default"] == 2
-    assert config["subai_group_queue_limit"]["default"] == 2
-    assert config["subai_queue_timeout_seconds"]["default"] == 30
     assert config["case_library_enabled"]["default"] is True
     assert config["case_library_max_records"]["default"] == 500
     assert config["case_reference_limit"]["default"] == 3
@@ -26,9 +22,9 @@ def test_configuration_and_metadata_contract() -> None:
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert 'version: "0.12.0"' in metadata
+    assert 'version: "0.11.2"' in metadata
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert 'PLUGIN_VERSION = "0.12.0"' in main_source
+    assert 'PLUGIN_VERSION = "0.11.2"' in main_source
     assert '@filter.llm_tool(name="lookup_liuyao_reference")' in main_source
     assert 'astrbot_version: ">=4.24.0"' in metadata
     assert "aiocqhttp" in metadata

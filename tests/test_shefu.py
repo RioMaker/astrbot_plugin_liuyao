@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -61,6 +60,7 @@ def test_listener_records_only_caster_and_group_and_survives_restart():
     wrong_group.message_str = "答案是苹果"
     assert run(plugin._collect_shefu_answer(wrong_group)) == ""
     # Mimic an independent event after plugin restart; no pending memory required.
+    plugin._pending_agent_cases = {}
     answer = _Event("member")
     answer.message_str = "答案是：苹果"
 
@@ -192,16 +192,6 @@ def test_shefu_agent_and_command_request_attributes_candidates_and_store_result(
 
         async def llm_generate(self, **kwargs):
             prompts.append(kwargs["prompt"])
-            if "临时六爻解读助手" in kwargs["prompt"]:
-                return SimpleNamespace(
-                    completion_text=json.dumps(
-                        {
-                            "analysis": analysis,
-                            "summary": "首选橡皮球，次选气球。",
-                        },
-                        ensure_ascii=False,
-                    )
-                )
             return SimpleNamespace(completion_text=analysis)
 
     captured = {}
@@ -221,11 +211,10 @@ def test_shefu_agent_and_command_request_attributes_candidates_and_store_result(
     assert captured["ai_comment"] == analysis
     record = plugin._test_store[LIUYAO_CASES_KEY]["cases"][0]
     assert record["intent"] == "shefu" and record["analysis"] == analysis
-    assert not hasattr(plugin, "_pending_agent_cases")
+    assert not plugin._pending_agent_cases
     context = run(plugin.cast_liuyao_tool(event, intent="射覆", question="袋中何物"))
-    assert "2–4 个具体候选物品" in prompts[-1] and "颜色" in prompts[-1]
-    assert "本次结果摘要" in context and analysis not in context
-    assert "真实答案" in prompts[-1]  # Historical shefu cases provided.
+    assert "2–4 个具体候选物品" in context and "颜色" in context
+    assert "真实答案" in context  # Historical shefu cases provided.
 
 
 def test_shefu_reference_library_excludes_other_directions():
@@ -296,7 +285,6 @@ def test_answer_before_analysis_keeps_feedback_status():
 
 def test_shefu_model_failure_still_keeps_original_cast():
     plugin = _make_enabled_plugin()
-    plugin.context = None
     result = run(plugin._dispatch_liuyao(_Event("member"), "手动 乾 射覆 盒中何物"))
     assert "分析未生成" in result
     case = plugin._test_store[LIUYAO_CASES_KEY]["cases"][0]
