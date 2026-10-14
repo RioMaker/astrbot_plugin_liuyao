@@ -39,14 +39,14 @@ def test_rolling_window_shared_across_groups_and_entrypoints(monkeypatch):
         now[0] += 10
         await plugin.cast_liuyao_tool(event, question="明天杭州是否下雨")
         assert len(plugin._test_store["cast_policy:20002"]["timestamps"]) == 3
-        assert "每小时最多" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "每小时最多" in await plugin._content_reply(_Event("member"), "这次面试能否录用")
         other_user = _Event("member")
         other_user.get_sender_id = lambda: "different-user"
         assert "本卦" in await plugin._content_reply(other_user, "这次面试能否录用")
         now[0] = 13599
-        assert "每小时最多" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "每小时最多" in await plugin._content_reply(_Event("member"), "这次面试能否录用")
         now[0] = 13600
-        assert "本卦" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "本卦" in await plugin._content_reply(_Event("member"), "这次面试能否录用")
 
     asyncio.run(check())
 
@@ -66,12 +66,13 @@ def test_duplicate_manual_and_instant_reuse_survives_reload(monkeypatch):
         record = plugin._test_store["cast_policy:20002"]
         for _ in range(5):
             text = await restored.reuse_liuyao_tool(event)
-            assert "7 8 9 6 7 8" in text
-            assert "复用原卦" in text
-        assert plugin._test_store["cast_policy:20002"] == record
+            assert "7 8 9 6 7 8" in restored.context.calls[-1]["prompt"]
+            assert "完整正文已直接发送" in text
+        assert plugin._test_store["cast_policy:20002"]["timestamps"] == record["timestamps"]
+        assert plugin._test_store["cast_policy:20002"]["last"]["chart"] == record["last"]["chart"]
         monkeypatch.setattr(cast_policy.time, "time", lambda: record["last"]["timestamp"] + 3601)
         assert "禁止连续" in await restored._content_reply(event, "这个项目能否签约！")
-        assert "复用原卦" in await restored._dispatch_liuyao(event, "解读")
+        assert await restored._dispatch_liuyao(_Event("member"), "解读") == ""
 
     asyncio.run(check())
 
@@ -94,7 +95,8 @@ def test_concurrent_requests_cannot_exceed_quota():
             ]
         )
         assert sum("本卦" in reply for reply in replies) == 3
-        assert sum("每小时最多" in reply for reply in replies) == 5
+        assert sum("队列已满" in reply for reply in replies) == 5
+        assert len(plugin._test_store["cast_policy:20002"]["timestamps"]) == 3
 
     asyncio.run(check())
 
@@ -124,7 +126,7 @@ def test_reuse_at_quota_and_group_isolation():
         for question in ["这个项目能否签约", "这次考试能否通过", "明天杭州是否下雨"]:
             await plugin._content_reply(event, question)
         before = list(plugin._test_store["cast_policy:20002"]["timestamps"])
-        assert "复用原卦" in await plugin.reuse_liuyao_tool(event)
+        assert "完整正文已直接发送" in await plugin.reuse_liuyao_tool(event)
         assert plugin._test_store["cast_policy:20002"]["timestamps"] == before
         elsewhere = _Event("member")
         elsewhere.get_group_id = lambda: "10002"
@@ -144,7 +146,8 @@ def test_concurrent_same_matter_is_cast_only_once():
             *[plugin._content_reply(_Event("member"), "这个项目能否签约") for _ in range(4)]
         )
         assert sum("本卦" in reply for reply in replies) == 1
-        assert sum("禁止连续" in reply for reply in replies) == 3
+        assert sum("禁止连续" in reply for reply in replies) == 2
+        assert sum("队列已满" in reply for reply in replies) == 1
 
     asyncio.run(check())
 
@@ -158,9 +161,9 @@ def test_wuxing_chat_history_is_not_a_liuyao_cast():
         empty = await plugin.reuse_liuyao_tool(event)
         assert "尚无" in empty and "五行数字记录不能替代六爻原卦" in empty
         result = await plugin.cast_liuyao_tool(event, question="这次求职能否成功")
-        assert "本卦：" in result
+        assert "完整正文已直接发送" in result
         assert len(plugin._test_store["cast_policy:20002"]["timestamps"]) == 1
-        duplicate = await plugin.cast_liuyao_tool(event, question="这次求职能否成功")
+        duplicate = await plugin.cast_liuyao_tool(_Event("member"), question="这次求职能否成功")
         assert "禁止连续起六爻卦" in duplicate
         assert "本限制仅适用于六爻" in duplicate
 

@@ -90,7 +90,7 @@ def test_any_topic_and_all_aliases_return_full_notes_without_casting(topic):
         assert result.count("### ") == 3
     assert not event.sent
     assert plugin._test_store == original
-    assert not plugin._pending_agent_cases
+    assert not hasattr(plugin, "_pending_agent_cases")
 
 
 def test_cross_topic_index_and_shared_documents_are_accessible():
@@ -181,7 +181,8 @@ def test_missing_notes_do_not_break_casting_or_private_archive_permissions(tmp_p
     result = asyncio.run(
         plugin.cast_liuyao_tool(_Event("member"), intent="weather", question="明天杭州是否下雨")
     )
-    assert "本卦：" in result and "lookup_liuyao_reference" in result
+    assert "完整正文已直接发送" in result
+    assert "古籍学习笔记 weather 未加载" in plugin.context.calls[-1]["prompt"]
     assert "未加载" in asyncio.run(plugin.lookup_liuyao_reference_tool(_Event("member"), "天气"))
     assert "仅 AstrBot 管理员" in asyncio.run(plugin._case_browser(_Event("member"), ""))
 

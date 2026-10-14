@@ -4,6 +4,7 @@ import math
 import time
 from dataclasses import replace
 from datetime import datetime
+from uuid import uuid4
 
 from astrbot.api import logger
 
@@ -46,13 +47,19 @@ class CastPolicyMixin:
                     )
                 # Generate only after admission; no await between generating and saving the record.
                 cast = cast if cast is not None else cast_instant()
-                cast = replace(cast, cast_at=datetime.fromtimestamp(now, BEIJING), chart=None)
+                cast = replace(
+                    cast,
+                    cast_at=datetime.fromtimestamp(now, BEIJING),
+                    chart=None,
+                    cast_id=uuid4().hex,
+                )
                 cast = replace(cast, chart=build_chart(cast))
                 await self.put_kv_data(
                     key,
                     {
                         "timestamps": stamps + [now],
                         "last": {
+                            "cast_id": cast.cast_id,
                             "question": question,
                             "intent": intent,
                             "method": method,

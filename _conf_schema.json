@@ -73,8 +73,8 @@
   },
   "agent_analysis_timeout_seconds": {
     "type": "int",
-    "description": "Agent 空回复后补解原卦的超时秒数",
-    "hint": "允许范围 10-180，默认 90。仅在本轮起卦后 Agent 没有正文时调用当前模型补解一次，不重新起卦；失败会发送提示。",
+    "description": "临时六爻助手生成完整解读的超时秒数",
+    "hint": "允许范围 10–180，默认 90。覆盖模型查找和生成；失败保留原卦，追问可复解，不交由主 AI 补写。",
     "default": 90
   },
   "chart_font_path": {
@@ -82,7 +82,23 @@
     "description": "六爻信息图自定义中文字体路径",
     "hint": "通常留空使用插件内置 Noto Sans CJK；也可填写自定义 .ttf/.ttc/.otf 绝对路径。路径无效时自动回退到内置字体。",
     "default": ""
+  },
+  "subai_max_concurrency": {
+    "type": "int",
+    "description": "全插件临时解读最大并发数",
+    "hint": "范围 1–8，默认 2；同群始终最多执行 1 个。修改后重载生效。",
+    "default": 2
+  },
+  "subai_group_queue_limit": {
+    "type": "int",
+    "description": "每群最多等待的解读请求数",
+    "hint": "范围 0–5，默认 2；队列满或等待超时不生成新卦、不计次数。修改后重载生效。",
+    "default": 2
+  },
+  "subai_queue_timeout_seconds": {
+    "type": "int",
+    "description": "解读请求等待执行名额的超时秒数",
+    "hint": "范围 5–120，默认 30；等待期间不创建子 AI。修改后重载生效。",
+    "default": 30
   }
 }
-
-

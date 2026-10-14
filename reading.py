@@ -56,6 +56,7 @@ class ReadingService:
         question: str,
         method: str,
         for_agent: bool = False,
+        for_child: bool = False,
     ) -> str:
         intent_key = self.normalize_intent(intent)
         profile = self.directions[intent_key]
@@ -120,7 +121,11 @@ class ReadingService:
             rows.append(f"方向提示：{curated['guidance']}")
 
         if for_agent:
-            rows.append(self.reference_context(intent_key))
+            if for_child:
+                rows.append(self.references.render(intent_key))
+                rows.append(self.study_references.lookup(intent_key))
+            else:
+                rows.append(self.reference_context(intent_key))
 
         if for_agent and intent_key == "weather":
             rows.extend(
@@ -152,7 +157,7 @@ class ReadingService:
         elif for_agent:
             rows.extend(
                 [
-                    "Agent解读约束：",
+                    "本次临时解读约束（只适用于本次任务）：",
                     "1. 图中AI短评是现代提示，不得当作古籍原文引用。",
                     "2. 原文只可引用工具提供的卦爻辞及参考文档中标明出处的原文摘录；"
                     "不要杜撰古籍原句。",

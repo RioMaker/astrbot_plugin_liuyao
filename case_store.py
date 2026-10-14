@@ -48,7 +48,6 @@ class LiuyaoCaseStoreMixin:
         question: str,
         method: str,
         cast_at: datetime,
-        track_agent: bool = True,
     ) -> tuple[str, str, str]:
         if not bool(self._config_get("case_library_enabled", True)):
             return "", "", "卦例库已由配置关闭。"
@@ -92,23 +91,7 @@ class LiuyaoCaseStoreMixin:
                     LIUYAO_CASES_KEY,
                     serialize_case_store(trim_cases(cases, maximum), payload),
                 )
-            if not track_agent:
-                return str(case["id"]), format_case_references(references), "排盘已保存。"
-            pending = getattr(self, "_pending_agent_cases", None)
-            if not isinstance(pending, dict):
-                pending = {}
-                self._pending_agent_cases = pending
-            run_key = self._agent_run_key(event)
-            pending_cases = pending.get(run_key, [])
-            if isinstance(pending_cases, str):
-                pending_cases = [pending_cases]
-            pending_cases.append(str(case["id"]))
-            pending[run_key] = pending_cases
-            return (
-                str(case["id"]),
-                format_case_references(references),
-                "排盘已保存；Agent 最终回复完成后将自动写入分析与断语。",
-            )
+            return str(case["id"]), format_case_references(references), "排盘已保存。"
         except Exception as exc:
             logger.exception("liuyao：创建卦例失败（%s）：%r", type(exc).__name__, exc)
             return "", "", f"卦例保存失败（{type(exc).__name__}）。"
@@ -135,7 +118,7 @@ class LiuyaoCaseStoreMixin:
         intent_key = self.readings.normalize_intent(intent)
         timestamp = cast_at.isoformat()
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "id": f"LY-{cast_at.strftime('%Y%m%d')}-{uuid4().hex[:8]}",
             "created_at": timestamp,
             "updated_at": timestamp,
@@ -148,6 +131,7 @@ class LiuyaoCaseStoreMixin:
             "question": question,
             "method": method,
             "cast": {
+                "cast_id": cast.cast_id,
                 "chart": chart_for(cast, cast_at),
                 "lines": list(cast.lines),
                 "primary_number": int(primary["number"]),
@@ -172,6 +156,8 @@ class LiuyaoCaseStoreMixin:
                 "changed_relatives": [line.label for line in changed_relatives.lines],
             },
             "analysis": "",
+            "summary": "",
+            "followups": [],
             "answer": "",
             "verdict": "",
             "feedback": [],
@@ -212,6 +198,36 @@ class LiuyaoCaseStoreMixin:
             logger.info("liuyao：已自动保存卦例分析 %s", case_id)
         except Exception as exc:
             logger.exception("liuyao：保存卦例分析失败（%s）：%r", type(exc).__name__, exc)
+
+    async def _save_case_child_reading(self, event, case_id, entry) -> bool:
+        """Append follow-ups without allowing a later reply to replace the first verdict."""
+        if not bool(self._config_get("case_library_enabled", True)):
+            return False
+        try:
+            async with self._case_lock_instance():
+                payload = await self.get_kv_data(LIUYAO_CASES_KEY, {})
+                cases = normalize_case_store(payload)
+                case = next(
+                    (
+                        item
+                        for item in cases
+                        if item["id"] == case_id
+                        and item.get("group_id") == str(event.get_group_id())
+                        and item.get("caster_id") == str(event.get_sender_id())
+                    ),
+                    None,
+                )
+                if case is None:
+                    return False
+                self._append_reading_entry(case, entry)
+                case["schema_version"] = 4
+                case["updated_at"] = entry["created_at"]
+                case["status"] = "feedback_recorded" if case.get("feedback") else "analyzed"
+                await self.put_kv_data(LIUYAO_CASES_KEY, serialize_case_store(cases, payload))
+            return True
+        except Exception as exc:
+            logger.warning("liuyao：子 AI 解读存档失败（%s）", type(exc).__name__)
+            return False
 
     async def _append_case_feedback(
         self,
@@ -309,17 +325,6 @@ class LiuyaoCaseStoreMixin:
             lock = asyncio.Lock()
             self._case_lock = lock
         return lock
-
-    def _agent_run_key(self, event: Any) -> str:
-        raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
-        message_id = str(self._raw_get(raw, "message_id") or "")
-        return "|".join(
-            (
-                str(getattr(event, "unified_msg_origin", "") or ""),
-                str(event.get_sender_id() or ""),
-                message_id,
-            )
-        )
 
     def _bounded_config_int(
         self,

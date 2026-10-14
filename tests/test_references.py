@@ -126,7 +126,8 @@ def test_explicit_concrete_intent_is_preserved():
             question="明日暴雨会影响出差吗",
         )
     )
-    assert "# 六爻分类参考：出行" in result
+    assert "# 六爻分类参考：出行" in plugin.context.calls[-1]["prompt"]
+    assert "分类研判参考" not in result
     assert "# 六爻分类参考：天气" not in result
 
 
@@ -142,6 +143,16 @@ def test_agent_weather_image_reference_and_case_roundtrip(tmp_path):
 
         async def llm_generate(self, **kwargs):
             prompts.append(kwargs["prompt"])
+            if "临时六爻解读助手" in kwargs["prompt"]:
+                return SimpleNamespace(
+                    completion_text=json.dumps(
+                        {
+                            "analysis": "本地测试分析。\n断语：明天杭州以阴天为主。",
+                            "summary": "明天杭州以阴天为主。",
+                        },
+                        ensure_ascii=False,
+                    )
+                )
             return SimpleNamespace(
                 completion_text=json.dumps(
                     {
@@ -169,12 +180,13 @@ def test_agent_weather_image_reference_and_case_roundtrip(tmp_path):
             question="明天杭州会下雨吗",
         )
     )
-    assert len(event.sent) == 1
+    assert len(event.sent) == 2
     assert rendered[0]["intent_label"].startswith("天气")
     assert "# 六爻分类参考：天气" in prompts[0]
     assert "本卦六亲" in prompts[0]
-    assert "# 六爻分类参考：天气" in text
-    assert "按已返回的天气参考研判" in text
+    assert "# 六爻分类参考：天气" in prompts[-1]
+    assert "缺少地点或时段先询问" in prompts[-1]
+    assert "分类研判参考" not in text
     assert "先明确断成败" not in text
     assert not (tmp_path / "weather.png").exists()
     record = plugin._test_store["liuyao_case_library"]["cases"][0]
@@ -216,9 +228,11 @@ def test_weather_missing_scope_and_reference_still_returns_cast(tmp_path):
     text = asyncio.run(
         plugin.cast_liuyao_tool(_Event("member"), intent="天气", question="明天是否下雨")
     )
-    assert "本卦：" in text
-    assert "weather.md 未加载" in text
-    assert "缺失先询问" in text
+    prompt = plugin.context.calls[-1]["prompt"]
+    assert "本卦：" in prompt
+    assert "weather.md 未加载" in prompt
+    assert "缺少地点或时段先询问" in prompt
+    assert "分类研判参考" not in text
 
 
 def test_weather_command_success_is_image_only(tmp_path):
@@ -236,7 +250,7 @@ def test_weather_command_success_is_image_only(tmp_path):
     event = _Event("member")
     assert asyncio.run(plugin._dispatch_liuyao(event, "明天杭州会下雨吗")) == ""
     assert len(event.sent) == 1 and captured[0]["intent_label"] == "天气"
-    assert not plugin._pending_agent_cases
+    assert not hasattr(plugin, "_pending_agent_cases")
 
 
 @pytest.mark.parametrize(
@@ -261,5 +275,7 @@ def test_each_agent_direction_returns_its_document(intent):
         plugin.cast_liuyao_tool(_Event("member"), intent=intent, question="这件安排能否按期完成")
     )
     label = plugin.readings.directions[intent]["label"]
-    assert f"# 六爻分类参考：{label}" in text
-    assert "# 六爻分类参考：通则" in text
+    prompt = plugin.context.calls[-1]["prompt"]
+    assert f"# 六爻分类参考：{label}" in prompt
+    assert "# 六爻分类参考：通则" in prompt
+    assert "分类研判参考" not in text

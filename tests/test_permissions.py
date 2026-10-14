@@ -101,9 +101,27 @@ class _Event:
         self.sent.append(message)
 
 
+class _ChildContext:
+    def __init__(self):
+        self.calls = []
+
+    async def get_current_chat_provider_id(self, **kwargs):
+        return "test-provider"
+
+    async def llm_generate(self, **kwargs):
+        self.calls.append(kwargs)
+        return types.SimpleNamespace(
+            completion_text=(
+                '{"analysis":"依据原卦判断。\\n断语：先落实条件再推进。",'
+                '"summary":"此事宜先落实条件再推进。"}'
+            )
+        )
+
+
 def _make_enabled_plugin() -> LiuyaoPlugin:
     plugin = object.__new__(LiuyaoPlugin)
     plugin.config = {}
+    plugin.context = _ChildContext()
     plugin.corpus = ZhouyiCorpus(ROOT / "data" / "zhouyi.json")
     plugin.readings = ReadingService(
         plugin.corpus,
@@ -122,7 +140,6 @@ def _make_enabled_plugin() -> LiuyaoPlugin:
     plugin.put_kv_data = put_data
     plugin._case_lock = asyncio.Lock()
     plugin._cast_lock = asyncio.Lock()
-    plugin._pending_agent_cases = {}
     plugin._test_store = store
     return plugin
 
@@ -217,7 +234,7 @@ def test_source_registers_flat_commands_and_agent_tools() -> None:
     assert '@filter.llm_tool(name="lookup_zhouyi_text")' in source
     assert '@filter.llm_tool(name="search_liuyao_cases")' in source
     assert '@filter.llm_tool(name="record_liuyao_feedback")' in source
-    assert "@filter.on_agent_done()" in source
+    assert "@filter.on_agent_done()" not in source
     assert "QQ 群主、QQ 群管理员或 AstrBot 管理员" in source
     compile(source, str(ROOT / "main.py"), "exec")
 
@@ -292,6 +309,7 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     class FakeContext:
         def __init__(self):
             self.prompt = ""
+            self.child_prompt = ""
 
         async def get_current_chat_provider_id(self, *, umo):
             assert umo == "aiocqhttp:GroupMessage:10001"
@@ -299,6 +317,14 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
 
         async def llm_generate(self, *, chat_provider_id, prompt):
             assert chat_provider_id == "provider-1"
+            if "临时六爻解读助手" in prompt:
+                self.child_prompt = prompt
+                return types.SimpleNamespace(
+                    completion_text=(
+                        '{"analysis":"结论：此事能成。\\n断语：三个月内先难后成。",'
+                        '"summary":"三个月内先难后成。"}'
+                    )
+                )
             self.prompt = prompt
             return types.SimpleNamespace(
                 completion_text=(
@@ -323,7 +349,8 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
         )
     )
 
-    assert len(event.sent) == 1
+    assert len(event.sent) == 2
+    assert "断语：三个月内先难后成。" in event.sent[1]["text"]
     assert event.sent[0]["image"].endswith("agent-chart.png")
     assert not (tmp_path / "agent-chart.png").exists()
     assert renderer.kwargs["caster_name"] == "测试群友"
@@ -334,33 +361,15 @@ def test_agent_cast_sends_ai_enriched_chart_before_context(tmp_path) -> None:
     assert renderer.kwargs["agent_name"] == "可可子"
     assert renderer.kwargs["ai_comment"] == "先核实机会与成本，再择稳妥时点推进。"
     assert "当前Agent自称：可可子" in context.prompt
-    assert "卦象信息图：已在工具返回前发送到当前会话" in result
-    assert "图卡补全：当前会话模型已补全方向并生成短评（事业）" in result
-    assert "AI短评：可可子：先核实机会与成本，再择稳妥时点推进。" in result
-    assert "本次卦例编号：LY-" in result
-    assert "Agent 最终回复完成后将自动写入分析与断语" in result
-    assert "本卦六亲（初爻→上爻）" in result
-    assert "不要机械复述排盘清单" in result
-    assert "不得把正反两面并列后不给结论" in result
-    assert "断语：" in result
-    assert "不附加与卦义无关的固定套话" in result
-
-    cases = plugin._test_store["liuyao_case_library"]["cases"]
-    assert len(cases) == 1
-    case_id = cases[0]["id"]
-    final_analysis = (
-        "结论：此事能成，但要先过成本关。\n以动爻和之卦看，主证强于反证。\n断语：三个月内先难后成。"
-    )
-    asyncio.run(
-        plugin.capture_liuyao_agent_analysis(
-            event,
-            object(),
-            types.SimpleNamespace(completion_text=final_analysis),
-        )
-    )
+    assert "完整正文已直接发送" in result
+    assert "卦例：LY-" in result
+    assert "本卦六亲（初爻→上爻）" in context.child_prompt
+    assert "不得用“既可能" in context.child_prompt
+    assert "断语：" not in result
+    assert "分类研判参考" not in result
     saved_case = plugin._test_store["liuyao_case_library"]["cases"][0]
-    assert saved_case["id"] == case_id
-    assert saved_case["analysis"] == final_analysis
+    case_id = saved_case["id"]
+    assert saved_case["analysis"] == event.sent[1]["text"]
     assert saved_case["verdict"] == "三个月内先难后成。"
     assert saved_case["status"] == "analyzed"
 
@@ -478,8 +487,9 @@ def test_agent_cast_falls_back_to_text_when_renderer_is_unavailable() -> None:
         )
     )
 
-    assert event.sent == []
-    assert "卦象信息图：渲染器不可用，已回退为文字卦象" in result
-    assert "本卦：" in result
-    assert "排盘图未能发送" in result
-    assert "断语：" in result
+    assert len(event.sent) == 2
+    assert "本卦：" in event.sent[0]["text"]
+    assert "断语：" in event.sent[1]["text"]
+    assert "完整正文已直接发送" in result
+    assert "本卦：" not in result
+    assert "断语：" not in result
