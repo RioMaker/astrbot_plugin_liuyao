@@ -46,6 +46,7 @@ core_star = types.ModuleType("astrbot.core.star")
 core_filter = types.ModuleType("astrbot.core.star.filter")
 command_api = types.ModuleType("astrbot.core.star.filter.command")
 api.logger = _Logger()
+api.AstrBotConfig = dict
 event_api.AstrMessageEvent = object
 event_api.filter = _Filter()
 star_api.Context = object
@@ -125,6 +126,19 @@ def _make_enabled_plugin() -> LiuyaoPlugin:
     plugin._pending_agent_cases = {}
     plugin._test_store = store
     return plugin
+
+
+def test_plugin_constructor_uses_injected_configuration(monkeypatch) -> None:
+    monkeypatch.setattr("main.LiuyaoImageRenderer", lambda *args, **kwargs: object())
+    global_config = {"cast_max_per_window": 99}
+    context = types.SimpleNamespace(get_config=lambda: global_config)
+
+    for config in [{}, {"cast_cooldown_seconds": 120, "cast_max_per_window": 2}]:
+        plugin = LiuyaoPlugin(context, config)
+        assert plugin.config is config
+
+    legacy_plugin = LiuyaoPlugin(context)
+    assert legacy_plugin.config is global_config
 
 
 def test_owner_group_admin_and_astrbot_admin_are_accepted() -> None:

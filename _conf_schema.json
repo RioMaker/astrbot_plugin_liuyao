@@ -17,6 +17,18 @@
     "hint": "超出部分会被截断，允许范围 20-1000。",
     "default": 200
   },
+  "cast_cooldown_seconds": {
+    "type": "int",
+    "description": "六爻起卦冷却窗口（秒）",
+    "hint": "按此滚动时间窗口统计每位用户的起卦次数，跨群、即时、手动和 Agent 共用。范围 1-86400，默认 3600（1 小时）；无效值回退默认。",
+    "default": 3600
+  },
+  "cast_max_per_window": {
+    "type": "int",
+    "description": "冷却窗口内每人最多起卦次数",
+    "hint": "范围 0-100，默认 3；0 关闭频率限制。无效值回退默认。同一事项连续起卦仍禁止，复解原卦不计次。",
+    "default": 3
+  },
   "case_library_enabled": {
     "type": "bool",
     "description": "启用六爻卦例库",

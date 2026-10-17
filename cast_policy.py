@@ -18,6 +18,34 @@ else:
 
 
 class CastPolicyMixin:
+    def _cast_limits(self):
+        def read_int(key, default, minimum, maximum):
+            value = self._config_get(key, default)
+            if isinstance(value, bool) or not isinstance(value, (int, str)):
+                return default
+            try:
+                value = int(value)
+            except ValueError:
+                return default
+            return value if minimum <= value <= maximum else default
+
+        return (
+            read_int("cast_cooldown_seconds", 3600, 1, 86400),
+            read_int("cast_max_per_window", 3, 0, 100),
+        )
+
+    @staticmethod
+    def _cast_limit_description(window_seconds, max_casts):
+        if max_casts == 0:
+            return "每位用户的六爻起卦频率限制已关闭"
+        if window_seconds == 3600:
+            window = "每小时"
+        elif window_seconds % 60 == 0:
+            window = f"滚动 {window_seconds // 60} 分钟内"
+        else:
+            window = f"滚动 {window_seconds} 秒内"
+        return f"每位用户{window}最多起卦 {max_casts} 次"
+
     async def _prepare_cast(self, event, cast, *, question, intent, method):
         error = question_error(question)
         if error:
@@ -30,18 +58,28 @@ class CastPolicyMixin:
             try:
                 state = await self.get_kv_data(key, {})
                 now = time.time()
-                stamps = [stamp for stamp in state.get("timestamps", []) if stamp > now - 3600]
+                window_seconds, max_casts = self._cast_limits()
+                stamps = sorted(
+                    stamp for stamp in state.get("timestamps", []) if stamp > now - window_seconds
+                )
                 previous = state.get("last", {})
                 if normalize_question(question) == normalize_question(previous.get("question", "")):
                     return None, (
                         "同一事情禁止连续起六爻卦。请用 /六爻 解读 或 reuse_liuyao 解读六爻原卦；"
                         "补充信息、换措辞或更换六爻起卦方式都不应重起。本限制仅适用于六爻。"
                     )
-                if len(stamps) >= 3:
-                    wait = max(1, math.ceil((min(stamps) + 3600 - now) / 60))
+                if max_casts and len(stamps) >= max_casts:
+                    # Lowering the quota may require multiple existing casts to expire.
+                    wait_seconds = max(1, math.ceil(stamps[-max_casts] + window_seconds - now))
+                    wait = (
+                        f"{wait_seconds} 秒"
+                        if wait_seconds < 60
+                        else f"{math.ceil(wait_seconds / 60)} 分钟"
+                    )
                     return (
                         None,
-                        f"六爻：每位用户每小时最多起卦 3 次，请约 {wait} 分钟后再试；"
+                        f"六爻：{self._cast_limit_description(window_seconds, max_casts)}，"
+                        f"请约 {wait}后再试；"
                         "六爻原卦可继续解读。",
                     )
                 # Generate only after admission; no await between generating and saving the record.
@@ -51,7 +89,8 @@ class CastPolicyMixin:
                 await self.put_kv_data(
                     key,
                     {
-                        "timestamps": stamps + [now],
+                        # Retain enough for every supported quota, even while disabled.
+                        "timestamps": (stamps + [now])[-100:],
                         "last": {
                             "question": question,
                             "intent": intent,

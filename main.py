@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from astrbot.api import logger
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
@@ -52,7 +52,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.11.2"
+PLUGIN_VERSION = "0.11.3"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -66,7 +66,7 @@ HELP_TEXT = """六爻起卦插件
 /起卦 六爻 ...
 
 规则：无事不卜，必须说明具体事情，随便看看不予起卦。
-同一用户跨群滚动 60 分钟内最多起六爻卦 3 次，即时与手动共用额度。
+{cast_limit}；跨群共享，即时与手动共用额度。
 同一事情禁止连续起六爻卦；/六爻 解读 可反复解读最近六爻原卦，不占次数。
 五行数字卦独立：其记录、次数和死卦结果均不影响六爻，同一事项可分别测两种术数。
 
@@ -113,10 +113,10 @@ Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情�
     PLUGIN_REPO,
 )
 class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.context = context
-        self.config = context.get_config() or {}
+        self.config = config if config is not None else (context.get_config() or {})
         self.plugin_dir = Path(__file__).resolve().parent
         self.corpus = ZhouyiCorpus(self.plugin_dir / "data" / "zhouyi.json")
         self.readings = ReadingService(
@@ -160,7 +160,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         """术数总入口；当前支持 /起卦 六爻 ...。"""
         parts = str(content or "").strip().split(maxsplit=1)
         if not parts or parts[0].lower() not in {"六爻", "liunyao"}:
-            yield event.plain_result("当前仅支持六爻。\n\n" + HELP_TEXT)
+            yield event.plain_result("当前仅支持六爻。\n\n" + self._help_text())
             return
         liuyao_tail = parts[1].strip() if len(parts) == 2 else ""
         reply = await self._dispatch_liuyao(event, liuyao_tail)
@@ -185,7 +185,8 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         无事不卜：用户只是随便看看、消遣、测试或未说明具体事情时，拒绝起卦并请其说明所问，禁止编造问题。
         六爻与五行数字卦完全独立：五行数字的记录、次数、死卦或停问提示都不影响本工具。
         用户仅测过五行数字卦，现在明确要求六爻时，即使是同一事项也应调用本工具，不能以已占过拒绝。
-        同一用户滚动 60 分钟最多起六爻卦 3 次，仅计算本插件成功保存的六爻记录。
+        同一用户跨群共享起卦额度；时间窗口和次数由 AstrBot 插件配置决定，以工具返回为准。
+        仅计算本插件成功保存的六爻记录，不要根据对话次数自行判断额度或拒绝调用。
         只有已存在同一事项的六爻原卦时，追问或换措辞才应调用 reuse_liuyao 或检索六爻卦例复解；
         五行数字结果不能作为六爻原卦复用，也不能写入六爻卦例。两边记录不互相增加或重置额度。
 
@@ -819,6 +820,9 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
     # ------------------------------------------------------------------
     # Shared command implementations
     # ------------------------------------------------------------------
+    def _help_text(self) -> str:
+        return HELP_TEXT.format(cast_limit=self._cast_limit_description(*self._cast_limits()))
+
     async def _dispatch_liuyao(
         self,
         event: AstrMessageEvent,
@@ -827,14 +831,14 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         """分派保留子命令；其他全部文本按即时问卦内容处理。"""
         text = (tail or "").strip()
         if not text:
-            return HELP_TEXT
+            return self._help_text()
 
         parts = text.split(maxsplit=1)
         token = parts[0].lower()
         remainder = parts[1].strip() if len(parts) == 2 else ""
 
         if token in {"help", "帮助", "说明"}:
-            return HELP_TEXT
+            return self._help_text()
         if token in {"解读", "复解", "reuse"}:
             return await self._reuse_cast(event)
         if token == "卦例":
