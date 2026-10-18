@@ -46,7 +46,17 @@ class CastPolicyMixin:
             window = f"滚动 {window_seconds} 秒内"
         return f"每位用户{window}最多起卦 {max_casts} 次"
 
-    async def _prepare_cast(self, event, cast, *, question, intent, method):
+    async def _prepare_cast(
+        self,
+        event,
+        cast,
+        *,
+        question,
+        intent,
+        method,
+        enforce_frequency=True,
+        confirm_ai_usage=None,
+    ):
         error = question_error(question)
         if error:
             return None, error
@@ -68,7 +78,7 @@ class CastPolicyMixin:
                         "同一事情禁止连续起六爻卦。请用 /六爻 解读 或 reuse_liuyao 解读六爻原卦；"
                         "补充信息、换措辞或更换六爻起卦方式都不应重起。本限制仅适用于六爻。"
                     )
-                if max_casts and len(stamps) >= max_casts:
+                if enforce_frequency and max_casts and len(stamps) >= max_casts:
                     # Lowering the quota may require multiple existing casts to expire.
                     wait_seconds = max(1, math.ceil(stamps[-max_casts] + window_seconds - now))
                     wait = (
@@ -89,8 +99,8 @@ class CastPolicyMixin:
                 await self.put_kv_data(
                     key,
                     {
-                        # Retain enough for every supported quota, even while disabled.
-                        "timestamps": (stamps + [now])[-100:],
+                        # Only AI tool casts enter the rolling frequency history.
+                        "timestamps": (stamps + ([now] if enforce_frequency else []))[-100:],
                         "last": {
                             "question": question,
                             "intent": intent,
@@ -102,6 +112,14 @@ class CastPolicyMixin:
                         },
                     },
                 )
+                if confirm_ai_usage is not None:
+                    try:
+                        await confirm_ai_usage()
+                    except Exception:
+                        # Restore both the original cast and hourly history
+                        # under this lock, before another cast can interleave.
+                        await self.put_kv_data(key, state)
+                        raise
             except Exception:
                 logger.exception("liuyao：起卦准入记录处理失败")
                 return None, "起卦记录读取或保存失败，本次未返回新卦，请稍后重试。"
@@ -136,9 +154,14 @@ class CastPolicyMixin:
                 method=last["method"],
                 for_agent=for_agent,
             )
+            if for_agent:
+                error = await self._claim_ai_daily(event)
+                if error:
+                    return error
             return (
-                "复用原卦：仅复用六爻原卦，不重新起六爻卦、不占次数。可结合补充信息多次解读。\n"
-                f"原卦时间：{cast_at.isoformat(timespec='seconds') if cast_at else '未知'}\n"
+                "复用原卦：仅复用六爻原卦，不重新起六爻卦、不占起卦频率次数。"
+                + ("本消息已通过 AI 日额度检查。\n" if for_agent else "本地查看不占 AI 日额度。\n")
+                + f"原卦时间：{cast_at.isoformat(timespec='seconds') if cast_at else '未知'}\n"
                 + reading
             )
         except Exception:

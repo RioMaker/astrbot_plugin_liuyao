@@ -15,6 +15,7 @@ from astrbot.core.star.filter.command import GreedyStr
 
 if __package__:
     from .agent_analysis import AgentAnalysisMixin
+    from .ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
     from .case_library import format_case_references, search_cases
     from .case_store import LiuyaoCaseStoreMixin
     from .cast_policy import CastPolicyMixin
@@ -27,11 +28,13 @@ if __package__:
         parse_manual_cast,
         split_manual_payload,
     )
+    from .question_policy import question_error
     from .reading import ReadingService
     from .renderer import ChartRenderError, LiuyaoImageRenderer
     from .shefu import ShefuMixin
 else:  # pragma: no cover - direct local execution
     from agent_analysis import AgentAnalysisMixin
+    from ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
     from case_library import format_case_references, search_cases
     from case_store import LiuyaoCaseStoreMixin
     from cast_policy import CastPolicyMixin
@@ -44,6 +47,7 @@ else:  # pragma: no cover - direct local execution
         parse_manual_cast,
         split_manual_payload,
     )
+    from question_policy import question_error
     from reading import ReadingService
     from renderer import ChartRenderError, LiuyaoImageRenderer
     from shefu import ShefuMixin
@@ -52,7 +56,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的六爻起卦：即时、手动、卦例库与 Agent Tool"
-PLUGIN_VERSION = "0.11.3"
+PLUGIN_VERSION = "0.12.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -66,8 +70,11 @@ HELP_TEXT = """六爻起卦插件
 /起卦 六爻 ...
 
 规则：无事不卜，必须说明具体事情，随便看看不予起卦。
-{cast_limit}；跨群共享，即时与手动共用额度。
-同一事情禁止连续起六爻卦；/六爻 解读 可反复解读最近六爻原卦，不占次数。
+Agent 工具新起卦：{cast_limit}；跨群共享，即时与手动共用额度。
+AI 起卦与解读另按北京时间自然日限额，默认每人每群每天 1 次；指定群配置覆盖默认。
+同一消息的 AI 起卦、短评与后续解读合并一次，新消息的 AI 复解另计一次。
+普通本地排盘与 /六爻 解读 不受次数限制；射覆指令的 AI 分析受日限额，可配置关闭。
+同一事情禁止连续起六爻卦；/六爻 解读 可反复查看最近六爻原卦，不占次数。
 五行数字卦独立：其记录、次数和死卦结果均不影响六爻，同一事项可分别测两种术数。
 
 起卦：
@@ -112,7 +119,11 @@ Agent 起卦会自动保存排盘、最终分析与断语；以后反馈事情�
     PLUGIN_VERSION,
     PLUGIN_REPO,
 )
-class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star):
+class LiuyaoPlugin(
+    DailyAIQuotaMixin, AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseStoreMixin, Star
+):
+    AI_DAILY_LABEL = "六爻"
+
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.context = context
@@ -185,8 +196,10 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         无事不卜：用户只是随便看看、消遣、测试或未说明具体事情时，拒绝起卦并请其说明所问，禁止编造问题。
         六爻与五行数字卦完全独立：五行数字的记录、次数、死卦或停问提示都不影响本工具。
         用户仅测过五行数字卦，现在明确要求六爻时，即使是同一事项也应调用本工具，不能以已占过拒绝。
-        同一用户跨群共享起卦额度；时间窗口和次数由 AstrBot 插件配置决定，以工具返回为准。
-        仅计算本插件成功保存的六爻记录，不要根据对话次数自行判断额度或拒绝调用。
+        AI 起卦和解读按每人每群每日限额，同一消息合并计一次，新消息复解另计一次。
+        指定群覆盖全局默认；新起卦另有跨群滚动频率限制，均以工具返回为准。
+        新起卦频次以本插件成功保存的六爻记录为准，AI 日额度还包含原卦复解和历史查阅。
+        不要根据对话次数自行判断额度或拒绝调用。
         只有已存在同一事项的六爻原卦时，追问或换措辞才应调用 reuse_liuyao 或检索六爻卦例复解；
         五行数字结果不能作为六爻原卦复用，也不能写入六爻卦例。两边记录不互相增加或重置额度。
 
@@ -226,7 +239,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         elif inferred_intent == "weather" and self.readings.normalize_intent(intent) == "general":
             # Keep detected weather stable even if the short-comment model misclassifies it.
             intent = "weather"
-        cast, error = await self._prepare_cast(
+        cast, error = await self._prepare_ai_cast(
             event,
             cast,
             question=limited_question,
@@ -333,13 +346,59 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
 
     @filter.llm_tool(name="reuse_liuyao")
     async def reuse_liuyao_tool(self, event: AstrMessageEvent) -> str:
-        """解读当前用户在本群的最近原卦，不起新卦也不占次数。
+        """供 AI 解读当前用户在本群的最近原卦，不起新卦，但新消息计入 AI 日限额。
 
         仅在用户已有六爻原卦、对此事追问或补充信息时调用；结合返回的六爻原卦和对话解读。
         只有五行数字记录时不能使用本工具替代六爻起卦，应按用户要求调用 cast_liuyao。
         禁止因不满意六爻结果或换措辞重起六爻卦。更早六爻卦例可用 search_liuyao_cases 查询。
         """
         return await self._reuse_cast(event, for_agent=True)
+
+    async def _claim_ai_daily(self, event) -> str:
+        """Authorize an actual AI phase, reusing this message's existing charge."""
+        try:
+            lease = await self._reserve_ai_daily(event)
+            if lease.error:
+                return lease.error
+            try:
+                await lease.commit()
+            finally:
+                await lease.release()
+        except AIQuotaStorageError:
+            logger.warning("liuyao：AI 日额度记录读写失败，本次未调用模型")
+            return "六爻 AI 日额度记录暂不可用，本次未进行 AI 解读，请稍后重试。"
+        return ""
+
+    async def _prepare_ai_cast(self, event, cast, *, question, intent, method):
+        """Reserve before creating a tool cast, and charge only after it is saved."""
+        error = question_error(question)
+        if error:
+            return None, error
+        lease = None
+        try:
+            lease = await self._reserve_ai_daily(event)
+            if lease.error:
+                return None, lease.error
+            cast, error = await self._prepare_cast(
+                event,
+                cast,
+                question=question,
+                intent=intent,
+                method=method,
+                confirm_ai_usage=lease.commit,
+            )
+            if error:
+                return None, error
+            return cast, ""
+        except AIQuotaStorageError:
+            logger.warning("liuyao：AI 日额度记录读写失败，本次未调用模型")
+            return None, "六爻 AI 日额度记录暂不可用，本次未进行 AI 解读，请稍后重试。"
+        finally:
+            if lease is not None:
+                try:
+                    await lease.release()
+                except AIQuotaStorageError:
+                    logger.warning("liuyao：未使用的 AI 预约暂未释放，请检查持久化存储")
 
     @filter.llm_tool(name="lookup_liuyao_reference")
     async def lookup_liuyao_reference_tool(
@@ -390,7 +449,10 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         hexagram: int = 0,
         limit: int = 3,
     ) -> str:
-        """检索当前群的历史六爻卦例；断新卦前或用户提到旧事进展时应主动调用。
+        """向 AI 提供历史六爻卦例供复解；有结果时计入本消息 AI 日额度。
+
+        与本消息的起卦和复解合并计一次；新消息查阅历史供 AI 解读另计一次。
+        没有匹配记录时不计，纯本地卦例指令不受此限额。
 
         Args:
             query(string): 当前问题、旧事关键词或用户反馈原文
@@ -422,6 +484,9 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         )
         if not matches:
             return "当前卦例库没有找到相关记录。"
+        quota_error = await self._claim_ai_daily(event)
+        if quota_error:
+            return quota_error
         return (
             "找到以下历史卦例。只把已经记录的原断和反馈作为经验旁证，"
             "仍须以当前卦象、动爻和所问为主：\n" + format_case_references(matches)
@@ -529,6 +594,8 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
         try:
             umo = str(getattr(event, "unified_msg_origin", "") or "")
             provider_id = await get_provider_id(umo=umo)
+            if not provider_id:
+                raise RuntimeError("当前会话没有可用模型")
             prompt = self._chart_enrichment_prompt(
                 cast,
                 base_intent=base_intent,
@@ -536,7 +603,9 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
                 question=question,
                 agent_name=display_name,
             )
-
+            quota_error = await self._claim_ai_daily(event)
+            if quota_error:
+                return base_intent, display_name, fallback_comment, quota_error
             response = await asyncio.wait_for(
                 llm_generate(
                     chat_provider_id=provider_id,
@@ -950,6 +1019,7 @@ class LiuyaoPlugin(AgentAnalysisMixin, CastPolicyMixin, ShefuMixin, LiuyaoCaseSt
             question=question,
             intent=intent,
             method=method,
+            enforce_frequency=False,
         )
         if error:
             return error

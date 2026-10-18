@@ -33,6 +33,7 @@ class _Filter:
 
 class _Logger:
     info = staticmethod(lambda *args, **kwargs: None)
+    error = staticmethod(lambda *args, **kwargs: None)
     warning = staticmethod(lambda *args, **kwargs: None)
     exception = staticmethod(lambda *args, **kwargs: None)
 
@@ -104,7 +105,7 @@ class _Event:
 
 def _make_enabled_plugin() -> LiuyaoPlugin:
     plugin = object.__new__(LiuyaoPlugin)
-    plugin.config = {}
+    plugin.config = {"ai_daily_limit": 0}
     plugin.corpus = ZhouyiCorpus(ROOT / "data" / "zhouyi.json")
     plugin.readings = ReadingService(
         plugin.corpus,

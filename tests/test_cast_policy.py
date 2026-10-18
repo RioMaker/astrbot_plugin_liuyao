@@ -34,20 +34,22 @@ def test_rolling_window_shared_across_groups_and_entrypoints(monkeypatch):
     other_group.get_group_id = lambda: "10002"
 
     async def check():
-        await plugin._content_reply(event, "这个项目能否签约")
+        await plugin.cast_liuyao_tool(event, question="这个项目能否签约")
         now[0] += 10
-        await plugin._manual_reply(other_group, "乾 这次考试能否通过")
+        await plugin.cast_liuyao_tool(
+            other_group, mode="manual", manual_lines="乾", question="这次考试能否通过"
+        )
         now[0] += 10
         await plugin.cast_liuyao_tool(event, question="明天杭州是否下雨")
         assert len(plugin._test_store["cast_policy:20002"]["timestamps"]) == 3
-        assert "每小时最多" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "每小时最多" in await plugin.cast_liuyao_tool(event, question="这次面试能否录用")
         other_user = _Event("member")
         other_user.get_sender_id = lambda: "different-user"
-        assert "本卦" in await plugin._content_reply(other_user, "这次面试能否录用")
+        assert "本卦" in await plugin.cast_liuyao_tool(other_user, question="这次面试能否录用")
         now[0] = 13599
-        assert "每小时最多" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "每小时最多" in await plugin.cast_liuyao_tool(event, question="这次面试能否录用")
         now[0] = 13600
-        assert "本卦" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "本卦" in await plugin.cast_liuyao_tool(event, question="这次面试能否录用")
 
     asyncio.run(check())
 
@@ -90,7 +92,7 @@ def test_concurrent_requests_cannot_exceed_quota():
     async def check():
         replies = await asyncio.gather(
             *[
-                plugin._content_reply(_Event("member"), f"第 {index} 个项目能否签约")
+                plugin.cast_liuyao_tool(_Event("member"), question=f"第 {index} 个项目能否签约")
                 for index in range(8)
             ]
         )
@@ -123,7 +125,7 @@ def test_reuse_at_quota_and_group_isolation():
 
     async def check():
         for question in ["这个项目能否签约", "这次考试能否通过", "明天杭州是否下雨"]:
-            await plugin._content_reply(event, question)
+            await plugin.cast_liuyao_tool(event, question=question)
         before = list(plugin._test_store["cast_policy:20002"]["timestamps"])
         assert "复用原卦" in await plugin.reuse_liuyao_tool(event)
         assert plugin._test_store["cast_policy:20002"]["timestamps"] == before
@@ -170,7 +172,11 @@ def test_wuxing_chat_history_is_not_a_liuyao_cast():
 
 def test_custom_window_shared_across_entrypoints_and_exact_expiry(monkeypatch):
     plugin = _make_enabled_plugin()
-    plugin.config = {"cast_cooldown_seconds": "120", "cast_max_per_window": "2"}
+    plugin.config = {
+        "ai_daily_limit": 0,
+        "cast_cooldown_seconds": "120",
+        "cast_max_per_window": "2",
+    }
     plugin._test_store["method_switches"]["10002"] = {"liuyao": True}
     now = [10000.0]
     monkeypatch.setattr(cast_policy.time, "time", lambda: now[0])
@@ -181,19 +187,21 @@ def test_custom_window_shared_across_entrypoints_and_exact_expiry(monkeypatch):
     async def check():
         help_text = await plugin._dispatch_liuyao(event, "help")
         assert "滚动 2 分钟内最多起卦 2 次" in help_text
-        assert "本卦" in await plugin._content_reply(event, "这个项目能否签约")
+        assert "本卦" in await plugin.cast_liuyao_tool(event, question="这个项目能否签约")
         now[0] = 10010
-        assert "本卦" in await plugin._manual_reply(elsewhere, "乾 这次考试能否通过")
+        assert "本卦" in await plugin.cast_liuyao_tool(
+            elsewhere, mode="manual", manual_lines="乾", question="这次考试能否通过"
+        )
         now[0] = 10059
         blocked = await plugin.cast_liuyao_tool(event, question="明天杭州是否下雨")
         assert "滚动 2 分钟内最多起卦 2 次" in blocked
         assert "约 2 分钟后" in blocked
         now[0] = 10061
-        assert "约 59 秒后" in await plugin._content_reply(event, "明天杭州是否下雨")
+        assert "约 59 秒后" in await plugin.cast_liuyao_tool(event, question="明天杭州是否下雨")
         now[0] = 10119
-        assert "约 1 秒后" in await plugin._content_reply(event, "明天杭州是否下雨")
+        assert "约 1 秒后" in await plugin.cast_liuyao_tool(event, question="明天杭州是否下雨")
         now[0] = 10120
-        assert "本卦" in await plugin._content_reply(event, "明天杭州是否下雨")
+        assert "本卦" in await plugin.cast_liuyao_tool(event, question="明天杭州是否下雨")
         assert plugin._test_store["cast_policy:20002"]["timestamps"] == [10010, 10120]
 
     asyncio.run(check())
@@ -201,29 +209,29 @@ def test_custom_window_shared_across_entrypoints_and_exact_expiry(monkeypatch):
 
 def test_lowering_quota_waits_until_enough_records_expire(monkeypatch):
     plugin = _make_enabled_plugin()
-    plugin.config = {"cast_cooldown_seconds": 120, "cast_max_per_window": 3}
+    plugin.config = {"ai_daily_limit": 0, "cast_cooldown_seconds": 120, "cast_max_per_window": 3}
     now = [10000.0]
     monkeypatch.setattr(cast_policy.time, "time", lambda: now[0])
     event = _Event("member")
 
     async def check():
         for question in ["这个项目能否签约", "这次考试能否通过", "明天杭州是否下雨"]:
-            assert "本卦" in await plugin._content_reply(event, question)
+            assert "本卦" in await plugin.cast_liuyao_tool(event, question=question)
             now[0] += 10
         plugin.config["cast_max_per_window"] = 1
         plugin._test_store["cast_policy:20002"]["timestamps"] = [10020, 10000, 10010]
-        assert "约 2 分钟后" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "约 2 分钟后" in await plugin.cast_liuyao_tool(event, question="这次面试能否录用")
         now[0] = 10120
-        assert "约 20 秒后" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "约 20 秒后" in await plugin.cast_liuyao_tool(event, question="这次面试能否录用")
         now[0] = 10140
-        assert "本卦" in await plugin._content_reply(event, "这次面试能否录用")
+        assert "本卦" in await plugin.cast_liuyao_tool(event, question="这次面试能否录用")
 
     asyncio.run(check())
 
 
 def test_disabling_frequency_keeps_bounded_history_duplicate_guard_and_reuse(monkeypatch):
     plugin = _make_enabled_plugin()
-    plugin.config = {"cast_cooldown_seconds": 120, "cast_max_per_window": 0}
+    plugin.config = {"ai_daily_limit": 0, "cast_cooldown_seconds": 120, "cast_max_per_window": 0}
     monkeypatch.setattr(cast_policy.time, "time", lambda: 10000)
     event = _Event("member")
     plugin._test_store["cast_policy:20002"] = {
@@ -233,14 +241,14 @@ def test_disabling_frequency_keeps_bounded_history_duplicate_guard_and_reuse(mon
     async def check():
         help_text = await plugin._dispatch_liuyao(event, "help")
         assert "频率限制已关闭" in help_text
-        assert "本卦" in await plugin._content_reply(event, "这个项目能否签约")
+        assert "本卦" in await plugin.cast_liuyao_tool(event, question="这个项目能否签约")
         saved = plugin._test_store["cast_policy:20002"]
         assert saved["timestamps"] == list(range(9901, 10000)) + [10000]
         assert saved["last"]["question"] == "这个项目能否签约"
-        assert "禁止连续" in await plugin._content_reply(event, "这个项目能否签约？")
+        assert "禁止连续" in await plugin.cast_liuyao_tool(event, question="这个项目能否签约？")
         assert "复用原卦" in await plugin.reuse_liuyao_tool(event)
         assert plugin._test_store["cast_policy:20002"] == saved
-        assert "本卦" in await plugin._content_reply(event, "这次考试能否通过")
+        assert "本卦" in await plugin.cast_liuyao_tool(event, question="这次考试能否通过")
         assert len(plugin._test_store["cast_policy:20002"]["timestamps"]) == 100
 
     asyncio.run(check())
@@ -248,7 +256,7 @@ def test_disabling_frequency_keeps_bounded_history_duplicate_guard_and_reuse(mon
 
 def test_custom_quota_is_atomic_under_concurrent_requests():
     plugin = _make_enabled_plugin()
-    plugin.config = {"cast_cooldown_seconds": 120, "cast_max_per_window": 2}
+    plugin.config = {"ai_daily_limit": 0, "cast_cooldown_seconds": 120, "cast_max_per_window": 2}
     original = plugin.get_kv_data
 
     async def delayed_get(key, default=None):
@@ -260,7 +268,7 @@ def test_custom_quota_is_atomic_under_concurrent_requests():
     async def check():
         replies = await asyncio.gather(
             *[
-                plugin._content_reply(_Event("member"), f"第 {index} 个项目能否签约")
+                plugin.cast_liuyao_tool(_Event("member"), question=f"第 {index} 个项目能否签约")
                 for index in range(6)
             ]
         )
@@ -281,12 +289,12 @@ def test_custom_quota_is_atomic_under_concurrent_requests():
 )
 def test_invalid_cooldown_configuration_falls_back_to_defaults(monkeypatch, key, value):
     plugin = _make_enabled_plugin()
-    plugin.config = {key: value}
+    plugin.config = {"ai_daily_limit": 0, key: value}
     monkeypatch.setattr(cast_policy.time, "time", lambda: 10000)
     timestamps = [9800, 9810, 9820]
     plugin._test_store["cast_policy:20002"] = {"timestamps": timestamps}
 
-    result = asyncio.run(plugin._content_reply(_Event("member"), "这次面试能否录用"))
+    result = asyncio.run(plugin.cast_liuyao_tool(_Event("member"), question="这次面试能否录用"))
 
     assert "每小时最多起卦 3 次" in result
     assert plugin._test_store["cast_policy:20002"]["timestamps"] == timestamps

@@ -155,6 +155,7 @@ def test_admission_reuse_and_case_archive_keep_identical_snapshot(monkeypatch):
         monkeypatch.setattr(cast_policy.time, "time", lambda: AT.timestamp() + 86400 * 30)
         restored = _make_enabled_plugin()
         restored.get_kv_data = plugin.get_kv_data
+        restored.put_kv_data = plugin.put_kv_data
         result = await restored._reuse_cast(event, for_agent=True)
         assert chart_text(snapshot) in result
         assert "己酉日" in result and "月建：酉" in result

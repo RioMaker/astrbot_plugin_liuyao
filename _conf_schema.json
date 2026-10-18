@@ -20,14 +20,42 @@
   "cast_cooldown_seconds": {
     "type": "int",
     "description": "六爻起卦冷却窗口（秒）",
-    "hint": "按此滚动时间窗口统计每位用户的起卦次数，跨群、即时、手动和 Agent 共用。范围 1-86400，默认 3600（1 小时）；无效值回退默认。",
+    "hint": "仅 Agent 工具新起卦按此滚动窗口统计，跨群、即时和手动共用；纯本地指令不受此限制且不计入。范围 1-86400，默认 3600（1 小时）；无效值回退默认。",
     "default": 3600
   },
   "cast_max_per_window": {
     "type": "int",
-    "description": "冷却窗口内每人最多起卦次数",
-    "hint": "范围 0-100，默认 3；0 关闭频率限制。无效值回退默认。同一事项连续起卦仍禁止，复解原卦不计次。",
+    "description": "冷却窗口内每人最多 Agent 起卦次数",
+    "hint": "仅 Agent 工具新起卦。范围 0-100，默认 3；0 关闭频率限制。纯本地指令不受次数限制；同一事项连续起卦仍禁止。AI 复解不占此频次，但新消息须使用下方 AI 日额度。",
     "default": 3
+  },
+  "ai_daily_limit": {
+    "type": "int",
+    "description": "每人每群每日 AI 起卦与解读次数",
+    "default": 1,
+    "hint": "有效范围 0–10000，默认 1 次，0 表示不限；北京时间每天 00:00 重置。六爻独立计数，不与数字卦合并。同一消息的 AI 起卦、短评、历史查阅和后续解读合并 1 次，新消息另计；纯本地排盘、查询与反馈不计。实际发出 AI 请求后即使失败仍计次。"
+  },
+  "ai_daily_group_limits": {
+    "type": "template_list",
+    "description": "指定群 AI 日次数覆盖",
+    "default": [],
+    "hint": "每人每群分别计数；首条有效的群号或 unified_msg_origin 匹配规则覆盖全局默认，未配置群使用上方默认次数。",
+    "templates": {
+      "group_ai_limit": {
+        "name": "指定群 AI 日次数",
+        "display_item": "group_id",
+        "items": {
+          "group_id": {"type": "string", "description": "群号或 unified_msg_origin", "default": ""},
+          "limit": {"type": "int", "description": "每人每日次数（0–10000，0 不限）", "default": 1}
+        }
+      }
+    }
+  },
+  "command_ai_analysis_enabled": {
+    "type": "bool",
+    "description": "射覆指令调用 AI 分析",
+    "default": true,
+    "hint": "开启时射覆指令的 AI 分析与 Agent 起卦/解读共用本群日额度；额度不足仍输出本地卦图和提示。关闭后射覆指令只输出本地排盘，不调用 AI、不计次数。普通非射覆指令始终为本地排盘。"
   },
   "case_library_enabled": {
     "type": "bool",

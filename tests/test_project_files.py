@@ -14,6 +14,9 @@ def test_configuration_and_metadata_contract() -> None:
     assert config["cast_cooldown_seconds"]["default"] == 3600
     assert config["cast_max_per_window"]["type"] == "int"
     assert config["cast_max_per_window"]["default"] == 3
+    assert config["ai_daily_limit"]["default"] == 1
+    assert config["ai_daily_group_limits"]["default"] == []
+    assert config["command_ai_analysis_enabled"]["default"] is True
     assert config["agent_send_chart_image"]["default"] is True
     assert config["command_send_chart_image"]["default"] is True
     assert config["agent_generate_chart_comment"]["default"] is True
@@ -26,9 +29,9 @@ def test_configuration_and_metadata_contract() -> None:
     metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8")
     assert "name: astrbot_plugin_liuyao" in metadata
     assert "show_disclaimer" not in config
-    assert 'version: "0.11.3"' in metadata
+    assert 'version: "0.12.0"' in metadata
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert 'PLUGIN_VERSION = "0.11.3"' in main_source
+    assert 'PLUGIN_VERSION = "0.12.0"' in main_source
     assert '@filter.llm_tool(name="lookup_liuyao_reference")' in main_source
     assert 'astrbot_version: ">=4.24.0"' in metadata
     assert "aiocqhttp" in metadata
