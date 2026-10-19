@@ -76,6 +76,13 @@ def search_cases(
     wanted_moving = {_safe_int(value) for value in moving_lines if _safe_int(value)}
     ranked: list[tuple[float, str, dict[str, Any]]] = []
     for case in cases:
+        # 未收到任何实际反馈的卦例不作为解卦参考，避免未经验证的旧断影响新判断。
+        feedback = case.get("feedback")
+        if not isinstance(feedback, list) or not any(
+            isinstance(item, dict) and str(item.get("text") or "").strip()
+            for item in feedback
+        ):
+            continue
         if not cross_group and str(case.get("group_id") or "") != str(group_id):
             continue
         if intent in {"shefu", "weather"} and case.get("intent") != intent:
