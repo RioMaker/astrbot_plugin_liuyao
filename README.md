@@ -2,13 +2,15 @@
 
 面向 QQ 群（OneBot v11 / aiocqhttp）的六爻起卦插件。默认 `/六爻 <内容>` 由 AI 预审、分类、随机起卦并解读；仅保留 `/六爻 开` 和 `/六爻 关` 控制当前群。
 
-## AI 每日次数、卦例反馈与模型检测（0.18.0）
+## AI 每日次数、卦例反馈与模型检测（0.19.0）
 
 默认每个 QQ 账号每天可使用 AI 预审和解卦 **1 次**，按北京时间 00:00 换日，跨群共享。`ai_daily_limit` 可在 AstrBot 插件配置中设定；有效次数范围为 `0–10000`，`0` 表示不限。`ai_quota_exhausted_message` 可自定义额度耗尽提示。
 
 `ai_quota_whitelist_qq` 可配置一个或多个无视每日 AI 额度的 QQ 号，使用逗号、空格或换行分隔。白名单用户仍正常调用预审和解卦模型，但不受额度限制，也不消耗额度。
 
 `ai_quota_score_tiers` 可按反馈积分配置每日额度阶梯，格式为“积分门槛:每日次数”，例如 `5:2,10:3` 表示积分达到 5 分每日 2 次、达到 10 分每日 3 次；未达到首个门槛使用 `ai_daily_limit`。有效反馈每次加 1 分，`/额度` 可查询当前剩余次数、积分与北京时间次日 00:00 的恢复时间。阶梯额度设置为 `0` 表示不限。
+
+预审、解卦、反馈审核、图卡短评、Agent 最终回复补充要求和空回复补解提示词均可在 AstrBot 配置中单独修改；留空使用插件内置的优化版本。自定义提示词替换默认主体，插件再追加固定的安全、数据隔离和输出格式约束。插件直接发送的 AI 解读会清理常见 Markdown 标记；Agent 起卦结果也会要求最终回复使用纯文本。
 
 - 一条 `/六爻 <内容>` 消息中的预审和解卦合并计一次；模型失败仍计次。
 - 内容无论模糊、随意或不符合解读条件，都会生成卦图；违反法律或基本伦理边界时不调用后续解读，并发送固定说明。
@@ -227,6 +229,12 @@ Agent 工具可显式传 `intent="shefu"` 或 `intent="射覆"`。
 - `ai_quota_whitelist_qq`：忽略 AI 每日额度限制的 QQ 号，多个号码用逗号、空格或换行分隔。
 - `ai_quota_exhausted_message`：额度耗尽后的自定义提示，留空使用默认文案。
 - `command_analysis_timeout_seconds`：预审和解读模型调用超时，5–180 秒，默认 60 秒。
+- `command_pre_review_prompt`：自定义默认起卦预审提示词，可用 `{question}`。
+- `command_interpretation_prompt`：自定义默认起卦解卦提示词，可用 `{question}`、`{chart}`。
+- `feedback_review_prompt`：自定义卦例反馈审核提示词，可用 `{question}`、`{hexagram}`、`{verdict}`、`{feedback}`。
+- `agent_chart_comment_prompt`：自定义图卡短评提示词，可用 `{agent_name}`、`{intent_instruction}`、`{available_intents}`、`{question}`、`{chart_reading}`、`{reference_context}`。
+- `agent_recovery_prompt`：自定义 Agent 空回复补解提示词，可用 `{readings}`。
+- `agent_final_reply_prompt`：Agent 解卦最终回复的附加要求，可用 `{intent}`、`{question}`、`{chart_status}`。
 - `case_library_enabled`：是否自动保存 Agent 六爻卦例，默认 `true`。
 - `case_library_max_records`：全插件卦例上限，范围 20–5000，默认 500。
 - `case_reference_limit`：每次起卦最多返回的相关卦例数，范围 1–5，默认 3。

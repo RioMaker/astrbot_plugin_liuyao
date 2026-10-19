@@ -59,6 +59,42 @@
     "default": 60,
     "hint": "允许范围 5–180 秒。超时仍返回卦图和固定提示。"
   },
+  "command_pre_review_prompt": {
+    "type": "string",
+    "description": "默认起卦内容预审提示词",
+    "default": "",
+    "hint": "留空使用插件默认提示词。可用变量 {question}。插件仍会追加 JSON 输出格式与安全边界要求。"
+  },
+  "command_interpretation_prompt": {
+    "type": "string",
+    "description": "默认起卦 AI 解卦提示词",
+    "default": "",
+    "hint": "留空使用插件默认提示词。可用变量 {question}、{chart}。插件仍会追加纯文本输出、专业边界和断语要求。"
+  },
+  "feedback_review_prompt": {
+    "type": "string",
+    "description": "卦例反馈审核提示词",
+    "default": "",
+    "hint": "留空使用插件默认提示词。可用变量 {question}、{hexagram}、{verdict}、{feedback}。插件仍会追加 JSON 格式要求。"
+  },
+  "agent_chart_comment_prompt": {
+    "type": "string",
+    "description": "Agent 起卦图卡短评提示词",
+    "default": "",
+    "hint": "留空使用插件默认提示词。可用变量 {agent_name}、{intent_instruction}、{available_intents}、{question}、{chart_reading}、{reference_context}。插件仍会追加短评 JSON 格式要求。"
+  },
+  "agent_recovery_prompt": {
+    "type": "string",
+    "description": "Agent 空回复时的原卦补解提示词",
+    "default": "",
+    "hint": "留空使用插件默认提示词。可用变量 {readings}。插件仍会要求依据现有原卦补解并以纯文本回复。"
+  },
+  "agent_final_reply_prompt": {
+    "type": "string",
+    "description": "Agent 解卦最终回复补充要求",
+    "default": "",
+    "hint": "可填写附加解卦要求。可用变量 {intent}、{question}、{chart_status}。插件仍会追加纯文本格式要求。"
+  },
   "case_library_enabled": {
     "type": "bool",
     "description": "启用六爻卦例库",
