@@ -35,11 +35,61 @@
     "default": 1,
     "hint": "有效范围 0–10000，默认每个 QQ 账号每天 1 次，0 表示不限；跨群共享，北京时间每天 00:00 重置。预审和后续解卦合并计 1 次；额度用完仍会起卦并发送卦图，但不调用 AI。"
   },
-  "ai_quota_score_tiers": {
-    "type": "string",
-    "description": "反馈积分对应的每日 AI 额度阶梯",
-    "default": "",
-    "hint": "填写“积分门槛:每日次数”，多个阶梯用逗号分隔，例如 5:2,10:3 表示积分达到 5 分每日 2 次、达到 10 分每日 3 次。未达到第一个门槛时使用 ai_daily_limit；每日次数填 0 表示不限。"
+  "ai_quota_feedback_rules": {
+    "type": "template_list",
+    "description": "有效反馈奖励规则",
+    "hint": "可添加、修改或删除规则。每条规则按指定天数统计 AI 审核有效的反馈数，达到门槛后增加每日 AI 额度；多条规则可同时生效并累加。没有规则时只使用基础额度。",
+    "default": [
+      {
+        "__template_key": "feedback_bonus",
+        "name": "7天反馈达标",
+        "window_days": 7,
+        "minimum_feedback_count": 3,
+        "daily_bonus": 1
+      },
+      {
+        "__template_key": "feedback_bonus",
+        "name": "30天反馈达标",
+        "window_days": 30,
+        "minimum_feedback_count": 11,
+        "daily_bonus": 1
+      }
+    ],
+    "templates": {
+      "feedback_bonus": {
+        "name": "有效反馈加额",
+        "hint": "统计周期内达到有效反馈数后，增加对应的每日 AI 解卦次数。",
+        "display_item": "name",
+        "items": {
+          "name": {
+            "type": "string",
+            "description": "规则名称",
+            "default": "新反馈规则"
+          },
+          "window_days": {
+            "type": "int",
+            "description": "统计天数",
+            "default": 7,
+            "hint": "统计最近多少天内 AI 审核有效的反馈；范围 1–3650。",
+            "slider": {"min": 1, "max": 3650, "step": 1}
+          },
+          "minimum_feedback_count": {
+            "type": "int",
+            "description": "有效反馈数门槛",
+            "default": 3,
+            "hint": "达到此数量后触发每日额度奖励。",
+            "slider": {"min": 1, "max": 10000, "step": 1}
+          },
+          "daily_bonus": {
+            "type": "int",
+            "description": "每日额度增加次数",
+            "default": 1,
+            "hint": "该规则达标后增加的每日 AI 解卦额度；范围 0–10000。填 0 表示该规则不增加额度。",
+            "slider": {"min": 0, "max": 10000, "step": 1}
+          }
+        }
+      }
+    }
   },
   "ai_quota_whitelist_qq": {
     "type": "string",

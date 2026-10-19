@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -289,7 +289,10 @@ class LiuyaoCaseStoreMixin:
                 case["updated_at"] = observed_at
                 case["status"] = "feedback_recorded"
                 updated_payload = serialize_case_store(cases, payload)
-                if reviewed_valid:
+                if reviewed_valid is True:
+                    self._record_valid_feedback_event(
+                        updated_payload, cases, caster_id, observed_at
+                    )
                     scores = updated_payload.get("user_scores", {})
                     if not isinstance(scores, dict):
                         scores = {}
@@ -329,6 +332,51 @@ class LiuyaoCaseStoreMixin:
         except Exception as exc:
             logger.warning("liuyao：读取卦例库失败（%s）：%r", type(exc).__name__, exc)
             return []
+
+    @staticmethod
+    def _record_valid_feedback_event(
+        payload: dict[str, Any],
+        cases: list[dict[str, Any]],
+        caster_id: str,
+        observed_at: str,
+    ) -> None:
+        ledger = payload.get("valid_feedback_events", {})
+        ledger = dict(ledger) if isinstance(ledger, dict) else {}
+        existing = ledger.get(caster_id)
+        if isinstance(existing, list):
+            values = [str(value) for value in existing]
+        else:
+            values = []
+            for case in cases:
+                feedback_rows = case.get("feedback", [])
+                if not isinstance(feedback_rows, list):
+                    continue
+                for feedback in feedback_rows:
+                    if not isinstance(feedback, dict) or feedback.get("valid") is not True:
+                        continue
+                    reporter_id = str(
+                        feedback.get("reporter_id") or case.get("caster_id") or ""
+                    ).strip()
+                    timestamp = str(feedback.get("observed_at") or "").strip()
+                    if reporter_id == caster_id and timestamp:
+                        values.append(timestamp)
+        if observed_at not in values:
+            values.append(observed_at)
+
+        now = datetime.now().astimezone()
+        cutoff = now - timedelta(days=3650)
+        recent_values = []
+        for value in values:
+            try:
+                timestamp = datetime.fromisoformat(value)
+            except ValueError:
+                continue
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=now.tzinfo)
+            if cutoff <= timestamp.astimezone(now.tzinfo) <= now:
+                recent_values.append(value)
+        ledger[caster_id] = recent_values
+        payload["valid_feedback_events"] = ledger
 
     def _case_lock_instance(self) -> asyncio.Lock:
         lock = getattr(self, "_case_lock", None)

@@ -80,32 +80,110 @@ class DailyAIQuotaMixin:
             return None
         return limit if 0 <= limit <= 10000 else None
 
-    def _ai_quota_score_tiers(self) -> list[tuple[int, int]]:
+    def _ai_quota_feedback_rules(self) -> list[dict[str, Any]]:
         config = getattr(self, "config", None) or {}
-        configured = config.get("ai_quota_score_tiers", "")
-        if isinstance(configured, dict):
-            entries = configured.items()
-        elif isinstance(configured, str):
-            entries = []
-            for part in re.split(r"[,，;；\s]+", configured.strip()):
-                if not part:
-                    continue
-                pair = re.split(r"[:：=]", part, maxsplit=1)
-                if len(pair) == 2:
-                    entries.append(pair)
-        else:
+        configured = config.get("ai_quota_feedback_rules", [])
+        if not isinstance(configured, list):
             return []
 
-        tiers: dict[int, int] = {}
-        for threshold_raw, limit_raw in entries:
+        rules = []
+        for index, entry in enumerate(configured, start=1):
+            if not isinstance(entry, dict):
+                continue
             try:
-                threshold = int(threshold_raw)
-                limit = self._daily_limit_value(limit_raw)
+                window_days = int(entry.get("window_days", 0))
+                minimum = int(entry.get("minimum_feedback_count", 0))
+                bonus = int(entry.get("daily_bonus", 0))
             except (TypeError, ValueError):
                 continue
-            if threshold >= 1 and limit is not None:
-                tiers[threshold] = limit
-        return sorted(tiers.items())
+            if (
+                isinstance(entry.get("window_days"), bool)
+                or isinstance(entry.get("minimum_feedback_count"), bool)
+                or isinstance(entry.get("daily_bonus"), bool)
+                or not 1 <= window_days <= 3650
+                or not 1 <= minimum <= 10000
+                or not 0 <= bonus <= 10000
+                or bonus == 0
+            ):
+                continue
+            rule_name = str(entry.get("name") or "").strip() or f"规则{index}"
+            rules.append(
+                {
+                    "name": rule_name,
+                    "window_days": window_days,
+                    "minimum_feedback_count": minimum,
+                    "daily_bonus": bonus,
+                }
+            )
+        return rules
+
+    @staticmethod
+    def _feedback_time(value: object) -> datetime | None:
+        try:
+            observed_at = datetime.fromisoformat(str(value or "").strip())
+        except (TypeError, ValueError):
+            return None
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=BEIJING)
+        return observed_at.astimezone(BEIJING)
+
+    async def _valid_feedback_counts(
+        self, event: Any, window_days: set[int]
+    ) -> dict[int, int]:
+        if not window_days:
+            return {}
+        sender = str(event.get_sender_id() or "").strip()
+        if not sender:
+            return {days: 0 for days in window_days}
+
+        payload = await self.get_kv_data("liuyao_case_library", {})
+        if isinstance(payload, dict):
+            event_ledger = payload.get("valid_feedback_events", {})
+            cases = payload.get("cases", [])
+        elif isinstance(payload, list):
+            event_ledger = {}
+            cases = payload
+        else:
+            return {days: 0 for days in window_days}
+
+        timestamps: list[datetime] = []
+        if isinstance(event_ledger, dict) and sender in event_ledger:
+            raw_events = event_ledger.get(sender)
+            if isinstance(raw_events, list):
+                timestamps.extend(
+                    parsed
+                    for parsed in (self._feedback_time(value) for value in raw_events)
+                    if parsed is not None
+                )
+        else:
+            if isinstance(cases, list):
+                for case in cases:
+                    if not isinstance(case, dict):
+                        continue
+                    feedback_rows = case.get("feedback", [])
+                    if not isinstance(feedback_rows, list):
+                        continue
+                    for feedback in feedback_rows:
+                        if not isinstance(feedback, dict) or feedback.get("valid") is not True:
+                            continue
+                        reporter_id = str(
+                            feedback.get("reporter_id") or case.get("caster_id") or ""
+                        ).strip()
+                        if reporter_id != sender:
+                            continue
+                        parsed = self._feedback_time(feedback.get("observed_at"))
+                        if parsed is not None:
+                            timestamps.append(parsed)
+
+        now = self._ai_daily_now().astimezone(BEIJING)
+        return {
+            days: sum(
+                1
+                for observed_at in timestamps
+                if now - timedelta(days=days) <= observed_at <= now
+            )
+            for days in window_days
+        }
 
     async def _feedback_score(self, event: Any) -> int:
         sender = str(event.get_sender_id() or "").strip()
@@ -122,22 +200,32 @@ class DailyAIQuotaMixin:
         except (TypeError, ValueError):
             return 0
 
-    def _daily_limit_for_score(self, score: int) -> int:
+    def _base_ai_daily_limit(self) -> int:
         config = getattr(self, "config", None) or {}
         default = self._daily_limit_value(config.get("ai_daily_limit", 1))
-        limit = 1 if default is None else default
-        for threshold, tier_limit in self._ai_quota_score_tiers():
-            if score < threshold:
-                break
-            limit = tier_limit
-        return limit
+        return 1 if default is None else default
+
+    @staticmethod
+    def _feedback_rule_bonus(
+        rules: list[dict[str, Any]], counts: dict[int, int]
+    ) -> int:
+        return sum(
+            rule["daily_bonus"]
+            for rule in rules
+            if counts.get(rule["window_days"], 0) >= rule["minimum_feedback_count"]
+        )
 
     async def _effective_ai_daily_limit(self, event: Any) -> int:
-        if not self._ai_quota_score_tiers():
-            config = getattr(self, "config", None) or {}
-            default = self._daily_limit_value(config.get("ai_daily_limit", 1))
-            return 1 if default is None else default
-        return self._daily_limit_for_score(await self._feedback_score(event))
+        base_limit = self._base_ai_daily_limit()
+        if base_limit == 0:
+            return 0
+        rules = self._ai_quota_feedback_rules()
+        if not rules:
+            return base_limit
+        counts = await self._valid_feedback_counts(
+            event, {rule["window_days"] for rule in rules}
+        )
+        return min(10000, base_limit + self._feedback_rule_bonus(rules, counts))
 
     def _is_ai_quota_whitelisted(self, event: Any) -> bool:
         try:
@@ -253,25 +341,37 @@ class DailyAIQuotaMixin:
         reset_text = reset_at.strftime("%Y-%m-%d %H:%M:%S")
         try:
             score = await self._feedback_score(event)
-            tiers = self._ai_quota_score_tiers()
-            next_tier = next(
-                ((threshold, limit) for threshold, limit in tiers if score < threshold),
-                None,
+            rules = self._ai_quota_feedback_rules()
+            counts = await self._valid_feedback_counts(
+                event, {rule["window_days"] for rule in rules}
             )
-            tier_progress = (
-                f"\n下一级：{next_tier[0]} 分后每日 {next_tier[1]} 次"
-                f"（还差 {next_tier[0] - score} 分）"
-                if next_tier
-                else ("\n已达到最高积分阶梯" if tiers else "")
+            bonus = self._feedback_rule_bonus(rules, counts)
+            base_limit = self._base_ai_daily_limit()
+            limit = 0 if base_limit == 0 else min(10000, base_limit + bonus)
+            applied_bonus = max(0, limit - base_limit) if base_limit > 0 else 0
+            rule_progress = (
+                "\n反馈奖励规则："
+                + "\n".join(
+                    f"{index}）{rule['name']}：最近{rule['window_days']}天有效反馈 "
+                    f"{counts.get(rule['window_days'], 0)}/{rule['minimum_feedback_count']} 次，"
+                    f"达标每日 +{rule['daily_bonus']} 次"
+                    for index, rule in enumerate(rules, start=1)
+                )
+                if rules
+                else "\n反馈奖励规则：未配置，当前无额外额度"
+            )
+            quota_detail = (
+                f"基础 {base_limit} 次 + 反馈奖励 {applied_bonus} 次"
+                if base_limit > 0
+                else "不限"
             )
             if self._is_ai_quota_whitelisted(event):
                 return (
                     "六爻 AI 每日额度：白名单，不限\n"
                     f"反馈积分：{score}\n"
-                    f"额度恢复时间：北京时间 {reset_text}{tier_progress}"
+                    f"额度恢复时间：北京时间 {reset_text}{rule_progress}"
                 )
 
-            limit = self._daily_limit_for_score(score)
             key, _ = self._daily_identity(event)
             record = await self._load_daily_record(key)
             entries = record["days"].get(now.date().isoformat(), {})
@@ -284,14 +384,14 @@ class DailyAIQuotaMixin:
                 return (
                     "六爻 AI 每日额度：不限\n"
                     f"反馈积分：{score}\n"
-                    f"额度恢复时间：北京时间 {reset_text}{tier_progress}"
+                    f"额度恢复时间：北京时间 {reset_text}{rule_progress}"
                 )
             remaining = max(0, limit - used)
             return (
-                f"六爻 AI 每日额度：{limit} 次\n"
+                f"六爻 AI 每日额度：{limit} 次（{quota_detail}）\n"
                 f"今日已用：{used} 次，剩余：{remaining} 次\n"
                 f"反馈积分：{score}\n"
-                f"额度恢复时间：北京时间 {reset_text}{tier_progress}"
+                f"额度恢复时间：北京时间 {reset_text}{rule_progress}"
             )
         except Exception as exc:
             logger.warning("liuyao：读取 AI 额度状态失败：%r", exc)
