@@ -59,13 +59,14 @@ LEGACY_SWITCHES_KEY = "group_switches"
 METHOD_LIUYAO = "liuyao"
 METHOD_LABELS = {METHOD_LIUYAO: "六爻"}
 
-HELP_TEXT = """六爻起卦
-/六爻 <任何内容>：AI 预审并分类后起卦；符合规范时继续 AI 解卦，不符合时仍起卦并说明原因。
-/六爻 开：开启本群；/六爻 关：关闭本群（群主、群管理员或 AstrBot 管理员可操作）。
-/ping：测试当前会话绑定的模型是否可调用，不起卦、不消耗额度。
-/额度：查询今日 AI 额度余量、反馈积分和额度恢复时间。
-每个 QQ 账号每天可用 AI 解卦次数可在 AstrBot 配置；额度用完仍起卦并发送卦图，但不调用 AI。
-"""
+HELP_TEXT = """六爻指令
+/六爻 <内容>：预审并起卦，符合条件时解卦；无额度时只返回卦图。
+/六爻 开、/六爻 关：管理员开启或关闭本群起卦。
+/起卦 六爻 <内容>：起卦入口，同 /六爻。
+/反馈 <内容>：反馈唯一待反馈卦例；多条时按提示用 /反馈 <序号> <内容>。
+/额度：查询今日余量、反馈积分和恢复时间。
+/ping：检测当前会话的六爻模型。
+/六爻：显示本帮助。"""
 
 
 @register(
@@ -934,7 +935,7 @@ class LiuyaoPlugin(
     # Shared command implementations
     # ------------------------------------------------------------------
     def _help_text(self) -> str:
-        return HELP_TEXT.format(cast_limit=self._cast_limit_description(*self._cast_limits()))
+        return HELP_TEXT
 
     async def _dispatch_liuyao(
         self,
