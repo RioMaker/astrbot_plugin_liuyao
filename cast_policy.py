@@ -56,10 +56,13 @@ class CastPolicyMixin:
         method,
         enforce_frequency=True,
         confirm_ai_usage=None,
+        enforce_question=True,
+        enforce_duplicate=True,
     ):
-        error = question_error(question)
-        if error:
-            return None, error
+        if enforce_question:
+            error = question_error(question)
+            if error:
+                return None, error
         sender = str(event.get_sender_id() or "").strip()
         if not sender:
             return None, "无法识别起卦用户，本次未起卦。"
@@ -73,7 +76,9 @@ class CastPolicyMixin:
                     stamp for stamp in state.get("timestamps", []) if stamp > now - window_seconds
                 )
                 previous = state.get("last", {})
-                if normalize_question(question) == normalize_question(previous.get("question", "")):
+                if enforce_duplicate and normalize_question(question) == normalize_question(
+                    previous.get("question", "")
+                ):
                     return None, (
                         "同一事情禁止连续起六爻卦。请用 /六爻 解读 或 reuse_liuyao 解读六爻原卦；"
                         "补充信息、换措辞或更换六爻起卦方式都不应重起。本限制仅适用于六爻。"

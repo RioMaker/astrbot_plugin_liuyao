@@ -1,4 +1,4 @@
-"""Per-plugin, per-chat daily AI admission backed by AstrBot KV storage."""
+"""Per-QQ-user daily AI admission backed by AstrBot KV storage."""
 
 from __future__ import annotations
 
@@ -81,28 +81,13 @@ class DailyAIQuotaMixin:
     def _effective_ai_daily_limit(self, event: Any) -> int:
         config = getattr(self, "config", None) or {}
         default = self._daily_limit_value(config.get("ai_daily_limit", 1))
-        default = 1 if default is None else default
-        group = str(event.get_group_id() or "").strip()
-        if not group:
-            return default
-        identifiers = {group, str(getattr(event, "unified_msg_origin", "") or "")}
-        rules = config.get("ai_daily_group_limits", [])
-        if isinstance(rules, list):
-            for rule in rules:
-                if not isinstance(rule, dict):
-                    continue
-                group_id = str(rule.get("group_id") or "").strip()
-                limit = self._daily_limit_value(rule.get("limit", 1))
-                if group_id and group_id in identifiers and limit is not None:
-                    return limit
-        return default
+        return 1 if default is None else default
 
     @staticmethod
     def _daily_identity(event: Any) -> tuple[str, str]:
         sender = str(event.get_sender_id() or "").strip()
         if not sender:
             raise ValueError("missing sender")
-        group = str(event.get_group_id() or "").strip()
         umo = str(getattr(event, "unified_msg_origin", "") or "")
         get_platform_id = getattr(event, "get_platform_id", None)
         platform = str(get_platform_id() or "") if callable(get_platform_id) else ""
@@ -113,7 +98,8 @@ class DailyAIQuotaMixin:
             platform = str(get_platform() or "") if callable(get_platform) else ""
         if not platform:
             raise ValueError("missing platform")
-        identity = [platform, "group" if group else "private", group or sender, sender]
+        # The user's allowance follows their QQ account across groups and sessions.
+        identity = [platform, "user", sender]
         digest = hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
         message = getattr(event, "message_obj", None)
         message_id = getattr(message, "message_id", None)
@@ -208,8 +194,13 @@ class DailyAIQuotaMixin:
                     return AIQuotaLease(
                         self,
                         error=(
-                            f"{self.AI_DAILY_LABEL}：你在当前群/会话今日的 AI 起卦与解读额度已用完"
-                            f"（每天 {limit} 次），北京时间次日 00:00 恢复；纯本地指令仍可使用。"
+                            str(
+                                (getattr(self, "config", None) or {}).get(
+                                    "ai_quota_exhausted_message", ""
+                                )
+                                or f"六爻：你今天的 AI 解卦额度已用完（每天 {limit} 次），"
+                                "北京时间次日 00:00 恢复。本次仍为你起卦，但不会调用 AI 解读。"
+                            )
                         ),
                     )
                 hold = uuid.uuid4().hex
