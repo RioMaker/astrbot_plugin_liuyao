@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -83,6 +84,25 @@ class DailyAIQuotaMixin:
         default = self._daily_limit_value(config.get("ai_daily_limit", 1))
         return 1 if default is None else default
 
+    def _is_ai_quota_whitelisted(self, event: Any) -> bool:
+        try:
+            config = getattr(self, "config", None) or {}
+            configured = config.get("ai_quota_whitelist_qq", "")
+            if isinstance(configured, str):
+                user_ids = re.split(r"[,，;；\s]+", configured)
+            elif isinstance(configured, (list, tuple, set)):
+                user_ids = configured
+            else:
+                return False
+            sender = str(event.get_sender_id() or "").strip()
+        except Exception:
+            return False
+        return bool(sender) and any(
+            str(user_id).strip() == sender
+            for user_id in user_ids
+            if isinstance(user_id, (str, int)) and not isinstance(user_id, bool)
+        )
+
     @staticmethod
     def _daily_identity(event: Any) -> tuple[str, str]:
         sender = str(event.get_sender_id() or "").strip()
@@ -145,6 +165,9 @@ class DailyAIQuotaMixin:
         return record
 
     async def _reserve_ai_daily(self, event: Any) -> AIQuotaLease:
+        if self._is_ai_quota_whitelisted(event):
+            # A whitelist bypass still performs the model work, but stores no quota entry.
+            return AIQuotaLease(self, _finished=True)
         try:
             # Event/session data may be changed by other framework handlers.
             # Freeze the admission identity before the first await.
