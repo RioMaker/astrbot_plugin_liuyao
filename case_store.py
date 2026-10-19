@@ -222,6 +222,8 @@ class LiuyaoCaseStoreMixin:
         outcome: str,
         answer: str = "",
         shefu_only: bool = False,
+        reviewed_valid: bool | None = None,
+        review_reason: str = "",
     ) -> str:
         if not bool(self._config_get("case_library_enabled", True)):
             return "卦例库已由配置关闭。"
@@ -250,7 +252,11 @@ class LiuyaoCaseStoreMixin:
                         or (case_id.isdigit() and case.get("serial") == int(case_id))
                     ]
                 elif shefu_only:
-                    eligible = [case for case in eligible if not case.get("answer")]
+                    eligible = [
+                        case
+                        for case in eligible
+                        if not case.get("answer") and not case.get("feedback")
+                    ]
                     if len(eligible) > 1:
                         numbers = "、".join(f"{case['serial']:03d}" for case in eligible)
                         return f"存在多条待揭晓射覆卦例（{numbers}），请发送：射覆答案 编号 物品。"
@@ -263,30 +269,51 @@ class LiuyaoCaseStoreMixin:
                 feedback_rows = [
                     dict(item) for item in case.get("feedback", []) if isinstance(item, dict)
                 ]
-                if any(
-                    item.get("text") == feedback and item.get("answer", "") == answer
-                    for item in feedback_rows
-                ):
-                    return f"卦例 {case['serial']:03d} 已记录该反馈。"
+                if feedback_rows:
+                    return f"卦例 {case['serial']:03d} 已反馈过，每个卦例只能反馈一次。"
                 observed_at = datetime.now().astimezone().isoformat()
-                feedback_rows.append(
-                    {
-                        "observed_at": observed_at,
-                        "outcome": outcome,
-                        "text": feedback,
-                        "answer": answer,
-                        "reporter_id": caster_id,
-                    }
-                )
+                feedback_item = {
+                    "observed_at": observed_at,
+                    "outcome": outcome,
+                    "text": feedback,
+                    "answer": answer,
+                    "reporter_id": caster_id,
+                }
+                if reviewed_valid is not None:
+                    feedback_item["valid"] = reviewed_valid
+                    feedback_item["review_reason"] = review_reason[:300]
+                feedback_rows.append(feedback_item)
                 case["feedback"] = feedback_rows[-20:]
                 if answer and case.get("intent") == "shefu":
                     case["answer"] = answer
                 case["updated_at"] = observed_at
                 case["status"] = "feedback_recorded"
-                await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases, payload))
+                updated_payload = serialize_case_store(cases, payload)
+                if reviewed_valid:
+                    scores = updated_payload.get("user_scores", {})
+                    if not isinstance(scores, dict):
+                        scores = {}
+                    scores = dict(scores)
+                    try:
+                        current_score = max(0, int(scores.get(caster_id, 0)))
+                    except (TypeError, ValueError):
+                        current_score = 0
+                    scores[caster_id] = current_score + 1
+                    updated_payload["user_scores"] = scores
+                await put_data(LIUYAO_CASES_KEY, updated_payload)
             if answer and case.get("intent") == "shefu":
-                return f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。"
-            return f"已将反馈写入卦例 {case['id']}（{outcome}）。"
+                score_note = "AI 审核有效，已记入积分。" if reviewed_valid else ""
+                return (
+                    f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。"
+                    f"{score_note}"
+                )
+            if reviewed_valid is True:
+                score_note = "AI 审核有效，已记入积分。"
+            elif reviewed_valid is False:
+                score_note = f"AI 审核未判为有效：{review_reason or '未提供可核验的实际进展'}。"
+            else:
+                score_note = ""
+            return f"已将反馈写入卦例 {case['id']}（{outcome}）。{score_note}"
         except Exception as exc:
             logger.exception("liuyao：保存卦例反馈失败（%s）：%r", type(exc).__name__, exc)
             return f"卦例反馈保存失败（{type(exc).__name__}）。"

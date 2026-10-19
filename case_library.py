@@ -43,8 +43,15 @@ def serialize_case_store(
         max((_safe_int(c.get("serial")) for c in records), default=0) + 1,
         _safe_int(previous.get("next_serial")) if isinstance(previous, dict) else 1,
     )
-    return {"schema_version": CASE_SCHEMA_VERSION, "cases": records,
-            "next_serial": next_serial}
+    result = dict(previous) if isinstance(previous, dict) else {}
+    result.update(
+        {
+            "schema_version": CASE_SCHEMA_VERSION,
+            "cases": records,
+            "next_serial": next_serial,
+        }
+    )
+    return result
 
 
 def trim_cases(cases: list[dict[str, Any]], maximum: int) -> list[dict[str, Any]]:

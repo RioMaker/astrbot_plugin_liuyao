@@ -50,7 +50,7 @@
   "case_library_enabled": {
     "type": "bool",
     "description": "启用六爻卦例库",
-    "hint": "Agent 起卦及射覆指令自动留档；同群出题人明确揭晓射覆答案后自动追加反馈。",
+    "hint": "Agent 起卦及默认指令完成 AI 解读后自动留档；群内射覆揭晓继续自动记录。/反馈 可提交本人待反馈卦例。",
     "default": true
   },
   "case_library_max_records": {
