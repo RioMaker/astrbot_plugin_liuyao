@@ -51,7 +51,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.14.0"
+PLUGIN_VERSION = "0.15.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -62,6 +62,7 @@ METHOD_LABELS = {METHOD_LIUYAO: "六爻"}
 HELP_TEXT = """六爻起卦
 /六爻 <任何内容>：AI 预审并分类后起卦；符合规范时继续 AI 解卦，不符合时仍起卦并说明原因。
 /六爻 开：开启本群；/六爻 关：关闭本群（群主、群管理员或 AstrBot 管理员可操作）。
+/ping：测试当前会话绑定的模型是否可调用，不起卦、不消耗额度。
 每个 QQ 账号每天可用 AI 解卦次数可在 AstrBot 配置；额度用完仍起卦并发送卦图，但不调用 AI。
 """
 
@@ -142,6 +143,43 @@ class LiuyaoPlugin(
         reply = await self._feedback_reply(event, str(content or ""))
         if reply:
             yield event.plain_result(reply)
+
+    @filter.command("ping")
+    async def llm_ping_command(self, event: AstrMessageEvent):
+        """用最小请求检查当前会话的模型调用状态，不执行起卦或扣减额度。"""
+        context = getattr(self, "context", None)
+        get_provider_id = getattr(context, "get_current_chat_provider_id", None)
+        llm_generate = getattr(context, "llm_generate", None)
+        if not callable(get_provider_id) or not callable(llm_generate):
+            yield event.plain_result("六爻模型检测失败：AstrBot 当前未提供模型调用接口。")
+            return
+
+        try:
+            provider = await get_provider_id(
+                umo=str(getattr(event, "unified_msg_origin", "") or "")
+            )
+            if not provider:
+                yield event.plain_result("六爻模型检测失败：当前会话没有绑定可用模型。")
+                return
+            response = await asyncio.wait_for(
+                llm_generate(chat_provider_id=provider, prompt="请仅回复 PONG。"),
+                timeout=self._bounded_config_int(
+                    "command_analysis_timeout_seconds", 60, 5, 180
+                ),
+            )
+            if getattr(response, "role", "") == "err":
+                yield event.plain_result("六爻模型检测失败：模型返回了错误状态。")
+                return
+            completion = str(getattr(response, "completion_text", "") or "").strip()
+            if not completion:
+                yield event.plain_result("六爻模型检测失败：模型调用成功，但返回内容为空。")
+                return
+            yield event.plain_result("六爻模型检测正常：当前会话模型已成功返回内容。")
+        except asyncio.TimeoutError:
+            yield event.plain_result("六爻模型检测失败：调用超时，请检查模型状态或超时配置。")
+        except Exception as exc:
+            logger.warning("liuyao：/ping 模型检测失败：%r", exc)
+            yield event.plain_result("六爻模型检测失败：调用过程中发生错误，请查看 AstrBot 日志。")
 
     # ------------------------------------------------------------------
     # Agent tools
