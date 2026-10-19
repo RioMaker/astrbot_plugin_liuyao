@@ -154,6 +154,13 @@ class LiuyaoPlugin(
     @filter.command("ping")
     async def llm_ping_command(self, event: AstrMessageEvent):
         """用最小请求检查当前会话的模型调用状态，不执行起卦或扣减额度。"""
+        caster_name, sender_id = self._caster_identity(event)
+        await self._send_caster_reply(
+            event,
+            sender_id,
+            caster_name,
+            "已收到，正在检测当前会话模型；本次不消耗起卦额度。",
+        )
         context = getattr(self, "context", None)
         get_provider_id = getattr(context, "get_current_chat_provider_id", None)
         llm_generate = getattr(context, "llm_generate", None)
@@ -1008,6 +1015,13 @@ class LiuyaoPlugin(
         else:
             return "请使用“/反馈 序号 内容”选择卦例。"
 
+        caster_name, sender_id = self._caster_identity(event)
+        await self._send_caster_reply(
+            event,
+            sender_id,
+            caster_name,
+            "已收到你的反馈，正在审核；本次不消耗起卦额度。",
+        )
         try:
             valid, outcome, reason = await self._review_case_feedback(event, case, feedback)
         except Exception as exc:
@@ -1086,7 +1100,18 @@ class LiuyaoPlugin(
         intent_hint, question = parse_intent_and_question(raw_question)
         question = question or raw_question or "（未提供具体内容）"
         intent = self.readings.normalize_intent(intent_hint)
+        caster_name, sender_id = self._caster_identity(event)
         lease = await self._reserve_ai_daily(event)
+        if lease.error:
+            progress_text = lease.error
+        elif lease.quota_unlimited:
+            progress_text = "已收到，正在为你起卦并解读；本次不受每日 AI 额度限制。"
+        elif lease.already_counted:
+            progress_text = "已收到，正在为你起卦并解读；本次请求已计入今日额度，不重复扣减。"
+        else:
+            progress_text = "已收到，正在为你起卦并解读；本次已预留 1 次今日 AI 解读额度。"
+        await self._send_caster_reply(event, sender_id, caster_name, progress_text)
+
         review = None
         review_error = ""
         provider = ""
@@ -1162,7 +1187,6 @@ class LiuyaoPlugin(
                 await lease.release()
             return cast_error
 
-        caster_name, sender_id = self._caster_identity(event)
         refusal = ""
         analysis = ""
         analysis_recordable = False
@@ -1245,7 +1269,17 @@ class LiuyaoPlugin(
         text = refusal or analysis
         if not chart_status.startswith("已发送"):
             text = f"排盘图未能发送（{chart_status}）。\n" + text
-        await self._send_caster_reply(event, sender_id, caster_name, text)
+        if lease.error:
+            # The quota notice was already sent before any slow model work.
+            if not chart_status.startswith("已发送"):
+                await self._send_caster_reply(
+                    event,
+                    sender_id,
+                    caster_name,
+                    f"排盘图未能发送（{chart_status}）。",
+                )
+        elif text:
+            await self._send_caster_reply(event, sender_id, caster_name, text)
         return ""
 
     async def _send_caster_reply(self, event, sender_id: str, caster_name: str, text: str) -> None:

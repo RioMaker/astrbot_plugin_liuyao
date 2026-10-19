@@ -42,6 +42,7 @@ class AIQuotaLease:
     hold: str = ""
     error: str = ""
     already_counted: bool = False
+    quota_unlimited: bool = False
     _finished: bool = False
 
     async def commit(self) -> None:
@@ -221,7 +222,7 @@ class DailyAIQuotaMixin:
     async def _reserve_ai_daily(self, event: Any) -> AIQuotaLease:
         if self._is_ai_quota_whitelisted(event):
             # A whitelist bypass still performs the model work, but stores no quota entry.
-            return AIQuotaLease(self, _finished=True)
+            return AIQuotaLease(self, quota_unlimited=True, _finished=True)
         try:
             # Event/session data may be changed by other framework handlers.
             # Freeze the admission identity before the first await.
@@ -317,7 +318,13 @@ class DailyAIQuotaMixin:
                 existing = entries.get(token)
                 if existing and existing["used"]:
                     return AIQuotaLease(
-                        self, key, day, token, already_counted=True, _finished=True
+                        self,
+                        key,
+                        day,
+                        token,
+                        already_counted=True,
+                        quota_unlimited=not bool(limit),
+                        _finished=True,
                     )
                 if existing is None and limit and len(entries) >= limit:
                     return AIQuotaLease(
@@ -337,7 +344,13 @@ class DailyAIQuotaMixin:
                 entry["holds"].append(hold)
                 await self.put_kv_data(key, record)
                 return AIQuotaLease(
-                    self, key, day, token, hold, already_counted=existing is not None
+                    self,
+                    key,
+                    day,
+                    token,
+                    hold,
+                    already_counted=existing is not None,
+                    quota_unlimited=not bool(limit),
                 )
         except asyncio.CancelledError:
             raise
