@@ -51,7 +51,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.17.0"
+PLUGIN_VERSION = "0.18.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -63,6 +63,7 @@ HELP_TEXT = """六爻起卦
 /六爻 <任何内容>：AI 预审并分类后起卦；符合规范时继续 AI 解卦，不符合时仍起卦并说明原因。
 /六爻 开：开启本群；/六爻 关：关闭本群（群主、群管理员或 AstrBot 管理员可操作）。
 /ping：测试当前会话绑定的模型是否可调用，不起卦、不消耗额度。
+/额度：查询今日 AI 额度余量、反馈积分和额度恢复时间。
 每个 QQ 账号每天可用 AI 解卦次数可在 AstrBot 配置；额度用完仍起卦并发送卦图，但不调用 AI。
 """
 
@@ -143,6 +144,11 @@ class LiuyaoPlugin(
         reply = await self._feedback_reply(event, str(content or ""))
         if reply:
             yield event.plain_result(reply)
+
+    @filter.command("额度")
+    async def ai_quota_command(self, event: AstrMessageEvent):
+        """查询当前 QQ 账号的每日 AI 额度余量及下次恢复时间。"""
+        yield event.plain_result(await self._ai_quota_status(event))
 
     @filter.command("ping")
     async def llm_ping_command(self, event: AstrMessageEvent):

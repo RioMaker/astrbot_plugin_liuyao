@@ -79,10 +79,64 @@ class DailyAIQuotaMixin:
             return None
         return limit if 0 <= limit <= 10000 else None
 
-    def _effective_ai_daily_limit(self, event: Any) -> int:
+    def _ai_quota_score_tiers(self) -> list[tuple[int, int]]:
+        config = getattr(self, "config", None) or {}
+        configured = config.get("ai_quota_score_tiers", "")
+        if isinstance(configured, dict):
+            entries = configured.items()
+        elif isinstance(configured, str):
+            entries = []
+            for part in re.split(r"[,，;；\s]+", configured.strip()):
+                if not part:
+                    continue
+                pair = re.split(r"[:：=]", part, maxsplit=1)
+                if len(pair) == 2:
+                    entries.append(pair)
+        else:
+            return []
+
+        tiers: dict[int, int] = {}
+        for threshold_raw, limit_raw in entries:
+            try:
+                threshold = int(threshold_raw)
+                limit = self._daily_limit_value(limit_raw)
+            except (TypeError, ValueError):
+                continue
+            if threshold >= 1 and limit is not None:
+                tiers[threshold] = limit
+        return sorted(tiers.items())
+
+    async def _feedback_score(self, event: Any) -> int:
+        sender = str(event.get_sender_id() or "").strip()
+        if not sender:
+            return 0
+        payload = await self.get_kv_data("liuyao_case_library", {})
+        if not isinstance(payload, dict):
+            return 0
+        scores = payload.get("user_scores", {})
+        if not isinstance(scores, dict):
+            return 0
+        try:
+            return max(0, int(scores.get(sender, 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    def _daily_limit_for_score(self, score: int) -> int:
         config = getattr(self, "config", None) or {}
         default = self._daily_limit_value(config.get("ai_daily_limit", 1))
-        return 1 if default is None else default
+        limit = 1 if default is None else default
+        for threshold, tier_limit in self._ai_quota_score_tiers():
+            if score < threshold:
+                break
+            limit = tier_limit
+        return limit
+
+    async def _effective_ai_daily_limit(self, event: Any) -> int:
+        if not self._ai_quota_score_tiers():
+            config = getattr(self, "config", None) or {}
+            default = self._daily_limit_value(config.get("ai_daily_limit", 1))
+            return 1 if default is None else default
+        return self._daily_limit_for_score(await self._feedback_score(event))
 
     def _is_ai_quota_whitelisted(self, event: Any) -> bool:
         try:
@@ -175,7 +229,7 @@ class DailyAIQuotaMixin:
             now = self._ai_daily_now().astimezone(BEIJING)
             day = now.date().isoformat()
             yesterday = (now.date() - timedelta(days=1)).isoformat()
-            limit = self._effective_ai_daily_limit(event)
+            limit = await self._effective_ai_daily_limit(event)
         except Exception as exc:  # noqa: BLE001 - malformed identities must fail closed.
             logger.error(f"AI 日限额身份读取失败：{type(exc).__name__}")
             return AIQuotaLease(self, error=STORAGE_ERROR)
@@ -189,6 +243,58 @@ class DailyAIQuotaMixin:
             await _wait_persistent_task(asyncio.create_task(lease.release()))
             raise asyncio.CancelledError
         return lease
+
+    async def _ai_quota_status(self, event: Any) -> str:
+        now = self._ai_daily_now().astimezone(BEIJING)
+        reset_at = datetime.combine(
+            now.date() + timedelta(days=1), datetime.min.time(), tzinfo=BEIJING
+        )
+        reset_text = reset_at.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            score = await self._feedback_score(event)
+            tiers = self._ai_quota_score_tiers()
+            next_tier = next(
+                ((threshold, limit) for threshold, limit in tiers if score < threshold),
+                None,
+            )
+            tier_progress = (
+                f"\n下一级：{next_tier[0]} 分后每日 {next_tier[1]} 次"
+                f"（还差 {next_tier[0] - score} 分）"
+                if next_tier
+                else ("\n已达到最高积分阶梯" if tiers else "")
+            )
+            if self._is_ai_quota_whitelisted(event):
+                return (
+                    "六爻 AI 每日额度：白名单，不限\n"
+                    f"反馈积分：{score}\n"
+                    f"额度恢复时间：北京时间 {reset_text}{tier_progress}"
+                )
+
+            limit = self._daily_limit_for_score(score)
+            key, _ = self._daily_identity(event)
+            record = await self._load_daily_record(key)
+            entries = record["days"].get(now.date().isoformat(), {})
+            used = sum(
+                1
+                for entry in entries.values()
+                if entry.get("used") or entry.get("holds")
+            )
+            if limit == 0:
+                return (
+                    "六爻 AI 每日额度：不限\n"
+                    f"反馈积分：{score}\n"
+                    f"额度恢复时间：北京时间 {reset_text}{tier_progress}"
+                )
+            remaining = max(0, limit - used)
+            return (
+                f"六爻 AI 每日额度：{limit} 次\n"
+                f"今日已用：{used} 次，剩余：{remaining} 次\n"
+                f"反馈积分：{score}\n"
+                f"额度恢复时间：北京时间 {reset_text}{tier_progress}"
+            )
+        except Exception as exc:
+            logger.warning("liuyao：读取 AI 额度状态失败：%r", exc)
+            return "暂时无法读取六爻 AI 额度信息，请稍后重试。"
 
     async def _reserve_ai_daily_uninterrupted(
         self, key: str, token: str, day: str, yesterday: str, limit: int

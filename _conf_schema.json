@@ -35,6 +35,12 @@
     "default": 1,
     "hint": "有效范围 0–10000，默认每个 QQ 账号每天 1 次，0 表示不限；跨群共享，北京时间每天 00:00 重置。预审和后续解卦合并计 1 次；额度用完仍会起卦并发送卦图，但不调用 AI。"
   },
+  "ai_quota_score_tiers": {
+    "type": "string",
+    "description": "反馈积分对应的每日 AI 额度阶梯",
+    "default": "",
+    "hint": "填写“积分门槛:每日次数”，多个阶梯用逗号分隔，例如 5:2,10:3 表示积分达到 5 分每日 2 次、达到 10 分每日 3 次。未达到第一个门槛时使用 ai_daily_limit；每日次数填 0 表示不限。"
+  },
   "ai_quota_whitelist_qq": {
     "type": "string",
     "description": "忽略 AI 每日额度的 QQ 号",
