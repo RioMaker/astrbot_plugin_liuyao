@@ -51,7 +51,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.20.0"
+PLUGIN_VERSION = "0.21.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -567,7 +567,10 @@ class LiuyaoPlugin(
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def collect_shefu_answer(self, event: AstrMessageEvent):
-        """Capture an explicit reveal even when the user does not mention the bot."""
+        """Capture explicit reveals and show help for configured bot mentions."""
+        if self._should_reply_mention_help(event):
+            yield event.plain_result(self._help_text())
+            return
         reply = await self._collect_shefu_answer(event)
         if reply:
             yield event.plain_result(reply)
@@ -1456,6 +1459,101 @@ class LiuyaoPlugin(
         if callable(getter):
             return getter(key, default)
         return default
+
+    def _configured_mention_help_group_ids(self) -> set[str]:
+        configured = self._config_get("mention_help_group_ids", "")
+        if isinstance(configured, str):
+            values = re.split(r"[,，;；\s]+", configured.strip())
+        elif isinstance(configured, (list, tuple, set)):
+            values = configured
+        else:
+            return set()
+        return {
+            str(value).strip()
+            for value in values
+            if str(value).strip().isdigit()
+        }
+
+    def _event_mentions_bot(self, event: AstrMessageEvent) -> bool:
+        get_self_id = getattr(event, "get_self_id", None)
+        try:
+            self_id = str(get_self_id() or "").strip() if callable(get_self_id) else ""
+        except Exception:
+            self_id = ""
+        if not self_id:
+            message_obj = getattr(event, "message_obj", None)
+            self_id = str(self._raw_get(message_obj, "self_id") or "").strip()
+        if not self_id:
+            return False
+
+        try:
+            from astrbot.api.message_components import At
+
+            get_messages = getattr(event, "get_messages", None)
+            messages = get_messages() if callable(get_messages) else []
+            if any(
+                isinstance(message, At)
+                and str(getattr(message, "qq", "")).strip() == self_id
+                for message in messages
+            ):
+                return True
+        except Exception:
+            pass
+
+        message_obj = getattr(event, "message_obj", None)
+        raw_message_obj = self._raw_get(message_obj, "raw_message")
+        raw_text = self._raw_get(raw_message_obj, "raw_message")
+        if isinstance(raw_text, str):
+            return bool(
+                re.search(
+                    rf"\[CQ:at,qq={re.escape(self_id)}(?:,|\])",
+                    raw_text,
+                    flags=re.IGNORECASE,
+                )
+            )
+        return False
+
+    def _message_command_text(self, event: AstrMessageEvent) -> str:
+        message_obj = getattr(event, "message_obj", None)
+        raw_message_obj = self._raw_get(message_obj, "raw_message")
+        raw_text = self._raw_get(raw_message_obj, "raw_message")
+        if isinstance(raw_text, str) and raw_text.strip():
+            return re.sub(r"\[CQ:at,[^\]]+\]", " ", raw_text).strip()
+
+        try:
+            from astrbot.api.message_components import Plain
+
+            get_messages = getattr(event, "get_messages", None)
+            messages = get_messages() if callable(get_messages) else []
+            text = "".join(
+                str(getattr(message, "text", ""))
+                for message in messages
+                if isinstance(message, Plain)
+            ).strip()
+            if text:
+                return text
+        except Exception:
+            pass
+        return self._message_text(event).strip()
+
+    def _is_plugin_command_message(self, text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+        roots = (
+            r"/(?:六爻|liunyao)(?=\s|$)",
+            r"/(?:起卦|divination)\s+(?:六爻|liunyao)(?=\s|$)",
+            r"/反馈(?=\s|$)",
+            r"/额度(?=\s|$)",
+            r"/ping(?=\s|$)",
+        )
+        return any(re.match(root, normalized, flags=re.IGNORECASE) for root in roots)
+
+    def _should_reply_mention_help(self, event: AstrMessageEvent) -> bool:
+        group_id = str(event.get_group_id() or "").strip()
+        if not group_id or group_id not in self._configured_mention_help_group_ids():
+            return False
+        if not self._event_mentions_bot(event):
+            return False
+        return not self._is_plugin_command_message(self._message_command_text(event))
 
     @staticmethod
     def _message_text(event: AstrMessageEvent) -> str:

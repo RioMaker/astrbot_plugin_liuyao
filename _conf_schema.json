@@ -5,6 +5,12 @@
     "hint": "建议保持关闭。当前只有六爻；群主、群管理员或 AstrBot 管理员可使用 /六爻 开 启用。",
     "default": false
   },
+  "mention_help_group_ids": {
+    "type": "string",
+    "description": "@机器人时显示六爻帮助的群号",
+    "hint": "填写一个或多个 QQ 群号，用逗号、空格或换行分隔；只在这些群内生效，留空关闭。",
+    "default": ""
+  },
   "allow_operator_api_lookup": {
     "type": "bool",
     "description": "缺少原始角色字段时查询群成员资料",

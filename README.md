@@ -2,9 +2,11 @@
 
 面向 QQ 群（OneBot v11 / aiocqhttp）的六爻起卦插件。默认 `/六爻 <内容>` 由 AI 预审、分类、随机起卦并解读；仅保留 `/六爻 开` 和 `/六爻 关` 控制当前群。
 
-## AI 每日次数、卦例反馈与模型检测（0.20.0）
+## AI 每日次数、卦例反馈与模型检测（0.21.0）
 
 默认每个 QQ 账号每天可使用 AI 预审和解卦 **1 次**，按北京时间 00:00 换日，跨群共享。`ai_daily_limit` 可在 AstrBot 插件配置中设定；有效次数范围为 `0–10000`，`0` 表示不限。`ai_quota_exhausted_message` 可自定义额度耗尽提示。
+
+`mention_help_group_ids` 可设置多个 QQ 群号。在这些群中，@机器人但没有触发有效的六爻插件指令时，会返回 `/六爻` 帮助；留空时关闭此功能。
 
 `ai_quota_whitelist_qq` 可配置一个或多个无视每日 AI 额度的 QQ 号，使用逗号、空格或换行分隔。白名单用户仍正常调用预审和解卦模型，但不受额度限制，也不消耗额度。
 
@@ -220,6 +222,7 @@ Agent 工具可显式传 `intent="shefu"` 或 `intent="射覆"`。
 配置项：
 
 - `default_enabled`：各术数在新群中的默认状态，建议保持 `false`。
+- `mention_help_group_ids`：在指定 QQ 群中，@机器人但未触发有效插件指令时显示六爻帮助；群号用逗号、空格或换行分隔。
 - `allow_operator_api_lookup`：原始事件缺少 `sender.role` 时，读取 OneBot 群成员资料核验群主/群管理员。
 - `max_question_length`：问题最大长度。
 - `cast_cooldown_seconds`：仅 Agent 工具新起卦的滚动统计窗口，范围 1–86400 秒，默认 3600 秒（1 小时）。
