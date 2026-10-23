@@ -81,6 +81,72 @@ class ChartRenderError(RuntimeError):
     """Raised when a chart cannot be rendered."""
 
 
+def find_cjk_font(*, bold: bool = False) -> Path:
+    """Return the first usable CJK font, preferring the bundled one."""
+    regular = [
+        BUNDLED_FONT_PATH,
+        Path("C:/Windows/Fonts/msyh.ttc"),
+        Path("C:/Windows/Fonts/simhei.ttf"),
+        Path("C:/Windows/Fonts/simsun.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+        Path("/System/Library/Fonts/PingFang.ttc"),
+    ]
+    bold_candidates = [
+        BUNDLED_FONT_PATH,
+        Path("C:/Windows/Fonts/msyhbd.ttc"),
+        Path("C:/Windows/Fonts/simhei.ttf"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+        Path("/System/Library/Fonts/PingFang.ttc"),
+    ]
+    candidates = bold_candidates + regular if bold else regular
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    kind = "粗体" if bold else "常规"
+    raise ChartRenderError(f"未找到可用于六爻信息图的中文{kind}字体")
+
+
+def temp_output_path(output_path: str | Path | None = None) -> Path:
+    """Resolve a PNG destination, creating a temporary file when none is given."""
+    if output_path is not None:
+        path = Path(output_path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+    fd, raw_path = tempfile.mkstemp(prefix="liuyao_chart_", suffix=".png")
+    os.close(fd)
+    return Path(raw_path).resolve()
+
+
+def draw_bamboo_background(canvas: Image.Image, width: int) -> None:
+    """Paint the two faded bamboo motifs behind a report of the given width."""
+    try:
+        with Image.open(BAMBOO_PATH) as source:
+            bamboo = source.convert("RGBA")
+    except OSError:
+        # Decoration must not prevent a chart from being sent.
+        return
+    for motif_width, x, y, mirror, opacity in (
+        (820, width - 820, 0, False, 0.08),
+        (610, -140, canvas.height - 915, True, 0.05),
+    ):
+        motif = bamboo.resize(
+            (motif_width, round(bamboo.height * motif_width / bamboo.width)),
+            Image.Resampling.LANCZOS,
+        )
+        if mirror:
+            motif = motif.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        # Multiply the original alpha; transparent negative space remains transparent.
+        alpha = motif.getchannel("A").point([round(value * opacity) for value in range(256)])
+        fade = Image.new("L", motif.size, 255)
+        fade_draw = ImageDraw.Draw(fade)
+        for offset in range(120):
+            row = motif.height - 120 + offset
+            fade_draw.line((0, row, motif_width, row), fill=round(255 * (119 - offset) / 119))
+        alpha = ImageChops.multiply(alpha, fade)
+        canvas.paste(motif, (x, y), alpha)
+
+
 class LiuyaoImageRenderer:
     """Draw a self-contained report; no network access or five-element legend."""
 
@@ -127,30 +193,7 @@ class LiuyaoImageRenderer:
 
     @staticmethod
     def _draw_background(canvas):
-        try:
-            with Image.open(BAMBOO_PATH) as source:
-                bamboo = source.convert("RGBA")
-        except OSError:
-            # Decoration must not prevent a chart from being sent.
-            return
-        for width, x, y, mirror, opacity in (
-            (820, WIDTH - 820, 0, False, 0.08),
-            (610, -140, canvas.height - 915, True, 0.05),
-        ):
-            motif = bamboo.resize(
-                (width, round(bamboo.height * width / bamboo.width)), Image.Resampling.LANCZOS
-            )
-            if mirror:
-                motif = motif.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-            # Multiply the original alpha; transparent negative space remains transparent.
-            alpha = motif.getchannel("A").point([round(value * opacity) for value in range(256)])
-            fade = Image.new("L", motif.size, 255)
-            fade_draw = ImageDraw.Draw(fade)
-            for offset in range(120):
-                row = motif.height - 120 + offset
-                fade_draw.line((0, row, width, row), fill=round(255 * (119 - offset) / 119))
-            alpha = ImageChops.multiply(alpha, fade)
-            canvas.paste(motif, (x, y), alpha)
+        draw_bamboo_background(canvas, WIDTH)
 
     def render(
         self,
@@ -536,38 +579,11 @@ class LiuyaoImageRenderer:
 
     @staticmethod
     def _find_font(*, bold: bool) -> Path:
-        regular = [
-            BUNDLED_FONT_PATH,
-            Path("C:/Windows/Fonts/msyh.ttc"),
-            Path("C:/Windows/Fonts/simhei.ttf"),
-            Path("C:/Windows/Fonts/simsun.ttc"),
-            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-            Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
-            Path("/System/Library/Fonts/PingFang.ttc"),
-        ]
-        bold_candidates = [
-            BUNDLED_FONT_PATH,
-            Path("C:/Windows/Fonts/msyhbd.ttc"),
-            Path("C:/Windows/Fonts/simhei.ttf"),
-            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
-            Path("/System/Library/Fonts/PingFang.ttc"),
-        ]
-        candidates = bold_candidates + regular if bold else regular
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate
-        kind = "粗体" if bold else "常规"
-        raise ChartRenderError(f"未找到可用于六爻信息图的中文{kind}字体")
+        return find_cjk_font(bold=bold)
 
     @staticmethod
     def _output_path(output_path: str | Path | None) -> Path:
-        if output_path is not None:
-            path = Path(output_path).resolve()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            return path
-        fd, raw_path = tempfile.mkstemp(prefix="liuyao_chart_", suffix=".png")
-        os.close(fd)
-        return Path(raw_path).resolve()
+        return temp_output_path(output_path)
 
     @staticmethod
     def _clean(value: str) -> str:

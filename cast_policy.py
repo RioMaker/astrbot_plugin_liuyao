@@ -80,7 +80,7 @@ class CastPolicyMixin:
                     previous.get("question", "")
                 ):
                     return None, (
-                        "同一事情禁止连续起六爻卦。请用 /六爻 解读 或 reuse_liuyao 解读六爻原卦；"
+                        "同一事情禁止连续起六爻卦。请改用 reuse_liuyao 解读六爻原卦；"
                         "补充信息、换措辞或更换六爻起卦方式都不应重起。本限制仅适用于六爻。"
                     )
                 if enforce_frequency and max_casts and len(stamps) >= max_casts:

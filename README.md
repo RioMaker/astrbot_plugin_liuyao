@@ -21,6 +21,20 @@
 
 该限制覆盖本插件的工具入口和实际模型调用，不拦截主 Agent 完全不调用本插件、仅凭已有聊天上下文生成的文字。需要统一计次的 AI 复解应调用 `reuse_liuyao`；本插件不根据聊天措辞猜测是否解卦。
 
+## 解卦篇幅、提示词可见与解卦玉笺（0.22.0）
+
+默认解卦提示词改为「先断、再证、后建议」的四段结构，并要求全文控制在 `command_reply_max_chars`（默认 280 字）以内。模型仍然超长时，`command_reply_trim` 会在句末截断，并且**始终保留末尾「断语：」一行**，不会只发出半句或丢掉结论。
+
+`command_pre_review_prompt`、`command_interpretation_prompt`、`feedback_review_prompt`、`agent_chart_comment_prompt`、`agent_recovery_prompt`、`agent_final_reply_prompt` 改为大文本框，可直接编辑。插件首次加载时会把内置提示词写入配置并显示出来，不再是一个空框；**清空某一项并保存，重载插件后即恢复内置默认**。`agent_final_reply_prompt` 没有内置正文，留空表示不追加额外要求。内置正文集中在 `prompts.py`，`tests/test_reply_card.py` 会检查配置与它保持一致。
+
+`command_reply_image_mode` 控制解卦正文是否转成图片：
+
+- `关闭`：只发文字；
+- `超长时`（默认）：正文达到 `command_reply_image_threshold`（默认 200 字）时改发解卦玉笺；
+- `始终`：AI 解卦一律发图片。
+
+解卦玉笺是 1080 宽的米白宣纸卡片：双线细框、左上角朱红「解卦」印章、玉绿宋体标题、引栏问句、首行缩进的正文段落，底部为带朱红「断」章的玉色断语栏。它与排盘图共用内置字体、五行配色和竹纹底，不新增依赖；渲染失败、字体缺失或平台不支持消息链时自动回退为纯文本。`chart_font_path` 同时作用于排盘图与解卦笺。起卦排盘图不受转图片设置影响，Agent 工具路径仍按原逻辑先发排盘图。
+
 ## 功能
 
 - 默认指令：`/六爻 <任意内容>`；AI 先预审并分类，再随机起卦。通过预审后调用 AI 解读。
@@ -232,12 +246,16 @@ Agent 工具可显式传 `intent="shefu"` 或 `intent="射覆"`。
 - `ai_quota_whitelist_qq`：忽略 AI 每日额度限制的 QQ 号，多个号码用逗号、空格或换行分隔。
 - `ai_quota_exhausted_message`：额度耗尽后的自定义提示，留空使用默认文案。
 - `command_analysis_timeout_seconds`：预审和解读模型调用超时，5–180 秒，默认 60 秒。
-- `command_pre_review_prompt`：自定义默认起卦预审提示词，可用 `{question}`。
-- `command_interpretation_prompt`：自定义默认起卦解卦提示词，可用 `{question}`、`{chart}`。
-- `feedback_review_prompt`：自定义卦例反馈审核提示词，可用 `{question}`、`{hexagram}`、`{verdict}`、`{feedback}`。
-- `agent_chart_comment_prompt`：自定义图卡短评提示词，可用 `{agent_name}`、`{intent_instruction}`、`{available_intents}`、`{question}`、`{chart_reading}`、`{reference_context}`。
-- `agent_recovery_prompt`：自定义 Agent 空回复补解提示词，可用 `{readings}`。
-- `agent_final_reply_prompt`：Agent 解卦最终回复的附加要求，可用 `{intent}`、`{question}`、`{chart_status}`。
+- `command_reply_max_chars`：AI 解卦正文的字数上限，0–2000，默认 280；0 表示不限。会写入解卦提示词，超出时按句截断并保留「断语：」。
+- `command_reply_trim`：正文超过字数上限时是否按句截断，默认 `true`。
+- `command_reply_image_mode`：解卦正文转图片的模式，`关闭` / `超长时`（默认）/ `始终`。
+- `command_reply_image_threshold`：`超长时` 模式下的转图片字数阈值，0–2000，默认 200。
+- `command_pre_review_prompt`：默认起卦预审提示词，可用 `{question}`。
+- `command_interpretation_prompt`：默认起卦解卦提示词，可用 `{question}`、`{chart}`、`{max_chars}`。
+- `feedback_review_prompt`：卦例反馈审核提示词，可用 `{question}`、`{hexagram}`、`{verdict}`、`{feedback}`。
+- `agent_chart_comment_prompt`：图卡短评提示词，可用 `{agent_name}`、`{intent_instruction}`、`{available_intents}`、`{question}`、`{chart_reading}`、`{reference_context}`。
+- `agent_recovery_prompt`：Agent 空回复补解提示词，可用 `{readings}`。
+- `agent_final_reply_prompt`：Agent 解卦最终回复的附加要求，可用 `{intent}`、`{question}`、`{chart_status}`；没有内置正文，留空表示不追加。
 - `case_library_enabled`：是否自动保存 Agent 六爻卦例，默认 `true`。
 - `case_library_max_records`：全插件卦例上限，范围 20–5000，默认 500。
 - `case_reference_limit`：每次起卦最多返回的相关卦例数，范围 1–5，默认 3。

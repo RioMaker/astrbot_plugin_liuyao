@@ -115,41 +115,68 @@
     "default": 60,
     "hint": "允许范围 5–180 秒。超时仍返回卦图和固定提示。"
   },
-  "command_pre_review_prompt": {
+  "command_reply_max_chars": {
+    "type": "int",
+    "description": "AI 解卦正文的字数上限",
+    "default": 280,
+    "slider": {"min": 0, "max": 2000, "step": 20},
+    "hint": "范围 0–2000，默认 280；0 表示不限。该数值会写入解卦提示词要求模型控制篇幅，超出时按句截断并保留末尾“断语：”。"
+  },
+  "command_reply_trim": {
+    "type": "bool",
+    "description": "超出字数上限时按句截断",
+    "default": true,
+    "hint": "默认开启。仅当正文超过上项字数上限时生效：在句末截断并保留“断语：”一行，不会只发出半句。关闭后只靠提示词请求模型自行收敛。"
+  },
+  "command_reply_image_mode": {
     "type": "string",
+    "description": "解卦正文转图片的模式",
+    "default": "超长时",
+    "options": ["关闭", "超长时", "始终"],
+    "hint": "关闭：只发文字；超长时：正文达到下方阈值时改发“解卦玉笺”图片；始终：AI 解卦一律发图片。起卦排盘图不受此项影响。"
+  },
+  "command_reply_image_threshold": {
+    "type": "int",
+    "description": "正文转图片的字数阈值",
+    "default": 200,
+    "slider": {"min": 0, "max": 2000, "step": 20},
+    "hint": "仅在“超长时”模式生效，范围 0–2000。正文达到该字数时改发解卦笺图片。"
+  },
+  "command_pre_review_prompt": {
+    "type": "text",
     "description": "默认起卦内容预审提示词",
     "default": "",
-    "hint": "留空使用插件默认提示词。可用变量 {question}。插件仍会追加 JSON 输出格式与安全边界要求。"
+    "hint": "留空时插件会自动填入内置提示词并在下次重载后显示在此，清空保存即恢复内置默认。可用变量 {question}。插件仍会追加 JSON 输出格式与安全边界要求。"
   },
   "command_interpretation_prompt": {
-    "type": "string",
+    "type": "text",
     "description": "默认起卦 AI 解卦提示词",
     "default": "",
-    "hint": "留空使用插件默认提示词。可用变量 {question}、{chart}。插件仍会追加纯文本输出、专业边界和断语要求。"
+    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件仍会追加纯文本输出、专业边界和断语要求。"
   },
   "feedback_review_prompt": {
-    "type": "string",
+    "type": "text",
     "description": "卦例反馈审核提示词",
     "default": "",
-    "hint": "留空使用插件默认提示词。可用变量 {question}、{hexagram}、{verdict}、{feedback}。插件仍会追加 JSON 格式要求。"
+    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {question}、{hexagram}、{verdict}、{feedback}。插件仍会追加 JSON 格式要求。"
   },
   "agent_chart_comment_prompt": {
-    "type": "string",
+    "type": "text",
     "description": "Agent 起卦图卡短评提示词",
     "default": "",
-    "hint": "留空使用插件默认提示词。可用变量 {agent_name}、{intent_instruction}、{available_intents}、{question}、{chart_reading}、{reference_context}。插件仍会追加短评 JSON 格式要求。"
+    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {agent_name}、{intent_instruction}、{available_intents}、{question}、{chart_reading}、{reference_context}。插件仍会追加短评 JSON 格式要求。"
   },
   "agent_recovery_prompt": {
-    "type": "string",
+    "type": "text",
     "description": "Agent 空回复时的原卦补解提示词",
     "default": "",
-    "hint": "留空使用插件默认提示词。可用变量 {readings}。插件仍会要求依据现有原卦补解并以纯文本回复。"
+    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {readings}。插件仍会要求依据现有原卦补解并以纯文本回复。"
   },
   "agent_final_reply_prompt": {
-    "type": "string",
+    "type": "text",
     "description": "Agent 解卦最终回复补充要求",
     "default": "",
-    "hint": "可填写附加解卦要求。可用变量 {intent}、{question}、{chart_status}。插件仍会追加纯文本格式要求。"
+    "hint": "本项没有内置默认正文，留空表示不追加额外要求。可填写附加解卦要求，可用变量 {intent}、{question}、{chart_status}；插件仍会追加纯文本格式要求。"
   },
   "case_library_enabled": {
     "type": "bool",
