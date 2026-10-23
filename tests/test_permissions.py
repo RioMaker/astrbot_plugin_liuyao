@@ -29,6 +29,7 @@ class _Filter:
     command = staticmethod(_identity_decorator)
     llm_tool = staticmethod(_identity_decorator)
     on_agent_done = staticmethod(_identity_decorator)
+    on_llm_request = staticmethod(_identity_decorator)
 
 
 class _Logger:

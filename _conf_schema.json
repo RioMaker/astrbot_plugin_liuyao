@@ -1,4 +1,10 @@
 {
+  "agent_tools_enabled": {
+    "type": "bool",
+    "description": "允许 AI 直接使用六爻插件",
+    "hint": "默认开启。关闭后 AI 仅能查询插件指令并指导用户使用，不能直接起卦、复解、查询资料或卦例、提交反馈。用户亲自发送 /六爻、/反馈 等指令的流程及其 AI 预审、解读不受影响。",
+    "default": true
+  },
   "default_enabled": {
     "type": "bool",
     "description": "各术数在新群中的默认状态",

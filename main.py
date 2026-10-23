@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 from datetime import datetime
@@ -73,13 +74,23 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.22.0"
+PLUGIN_VERSION = "0.23.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
 LEGACY_SWITCHES_KEY = "group_switches"
 METHOD_LIUYAO = "liuyao"
 METHOD_LABELS = {METHOD_LIUYAO: "六爻"}
+AGENT_ACTION_TOOL_NAMES = frozenset(
+    {
+        "cast_liuyao",
+        "reuse_liuyao",
+        "lookup_liuyao_reference",
+        "lookup_zhouyi_text",
+        "search_liuyao_cases",
+        "record_liuyao_feedback",
+    }
+)
 
 HELP_TEXT = """六爻指令
 /六爻 <内容>：预审并起卦，符合条件时解卦；无额度时只返回卦图。
@@ -234,6 +245,45 @@ class LiuyaoPlugin(
 
     # ------------------------------------------------------------------
     # Agent tools
+    @filter.on_llm_request()
+    async def configure_liuyao_agent_tools(self, event: AstrMessageEvent, req: Any) -> None:
+        """Offer only command help when direct Agent access is disabled."""
+        if self._config_get("agent_tools_enabled", True):
+            return
+        toolset = getattr(req, "func_tool", None)
+        if toolset is None:
+            return
+        # Keep filtering local to this request, even if a tool set is shared.
+        filtered = copy.copy(toolset)
+        filtered.tools = [
+            tool for tool in toolset.tools if tool.name not in AGENT_ACTION_TOOL_NAMES
+        ]
+        req.func_tool = filtered
+
+    @filter.llm_tool(name="get_liuyao_help")
+    async def get_liuyao_help_tool(self, event: AstrMessageEvent) -> str:
+        """获取六爻插件当前使用模式与指令，向用户说明如何使用插件。
+
+        当 AI 直接使用六爻功能关闭时，只能指导用户亲自发送返回的指令；
+        不代用户执行指令、不起卦、不解卦、不读取历史卦例，也不编造执行结果。
+        本工具不消耗六爻额度，未开启六爻的群也可查询使用方法。
+        """
+        return self._agent_tools_disabled_reply() or (
+            "当前允许 AI 直接使用六爻插件；用户也可亲自发送以下指令。\n\n" + self._help_text()
+        )
+
+    def _agent_tools_disabled_reply(self) -> str:
+        if self._config_get("agent_tools_enabled", True):
+            return ""
+        return (
+            "当前已关闭 AI 直接使用六爻插件，仅可向用户说明使用方法。"
+            "请指导用户亲自发送以下指令，不要代发指令、起卦、解卦或编造执行结果。\n\n"
+            + self._help_text()
+        )
+
+    async def _agent_tool_gate(self, event: AstrMessageEvent) -> str:
+        return self._agent_tools_disabled_reply() or await self._group_gate(event, METHOD_LIUYAO)
+
     # ------------------------------------------------------------------
     @filter.llm_tool(name="cast_liuyao")
     async def cast_liuyao_tool(
@@ -258,7 +308,7 @@ class LiuyaoPlugin(
             question(string): 用户输入的原始内容
             agent_name(string): 当前 Agent 对用户使用的自称或人格名，如可可子；应主动传入
         """
-        error = await self._group_gate(event, METHOD_LIUYAO)
+        error = await self._agent_tool_gate(event)
         if error:
             return error
 
@@ -398,6 +448,9 @@ class LiuyaoPlugin(
         只有五行数字记录时不能使用本工具替代六爻起卦，应按用户要求调用 cast_liuyao。
         禁止因不满意六爻结果或换措辞重起六爻卦。更早六爻卦例可用 search_liuyao_cases 查询。
         """
+        error = await self._agent_tool_gate(event)
+        if error:
+            return error
         return await self._reuse_cast(event, for_agent=True)
 
     async def _claim_ai_daily(self, event) -> str:
@@ -460,7 +513,7 @@ class LiuyaoPlugin(
         Args:
             topic(string): 留空返回目录；支持各方向及英文类别键；基础或来源读取共同笔记和版本记录
         """
-        error = await self._group_gate(event, METHOD_LIUYAO)
+        error = await self._agent_tool_gate(event)
         if error:
             return error
         return self.readings.study_references.lookup(topic)
@@ -478,7 +531,7 @@ class LiuyaoPlugin(
             hexagram(number): 文王卦序，1 到 64
             line(number): 0 返回卦辞；1 到 6 返回初爻至上爻的对应爻辞
         """
-        error = await self._group_gate(event, METHOD_LIUYAO)
+        error = await self._agent_tool_gate(event)
         if error:
             return error
         try:
@@ -506,7 +559,7 @@ class LiuyaoPlugin(
             hexagram(number): 已知本卦的文王卦序，不知道时填 0
             limit(number): 返回数量，1 到 10，通常使用 3
         """
-        error = await self._group_gate(event, METHOD_LIUYAO)
+        error = await self._agent_tool_gate(event)
         if error:
             return error
         try:
@@ -555,7 +608,7 @@ class LiuyaoPlugin(
             outcome(string): 应验、部分应验、未应验、进行中或未分类
             answer(string): 射覆时用户明确揭晓的实际物品；只摘录用户答案，禁止写入 AI 候选猜测
         """
-        error = await self._group_gate(event, METHOD_LIUYAO)
+        error = await self._agent_tool_gate(event)
         if error:
             return error
         cleaned = self._clean_case_text(feedback, 1000)
