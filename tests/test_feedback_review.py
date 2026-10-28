@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import inspect
 import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from ai_daily_quota import BEIJING
 from case_library import search_cases
 from case_store import LIUYAO_CASES_KEY
 from feedback_review import MAX_REVIEW_ROUNDS, parse_review_command
+from main import GreedyStr, LiuyaoPlugin
 
 
 def decision(case_id="case-1", *, valid=True, **overrides):
@@ -111,13 +113,44 @@ def test_bare_command_lists_private_queue_rules_and_does_not_call_ai():
                 (now - timedelta(days=5)).isoformat(),
             ]
         }
-        replies = [reply async for reply in plugin.liuyao_feedback_command(event)]
+        replies = [reply async for reply in plugin.liuyao_feedback_command(event, "")]
         text = replies[0]["text"]
         assert "队列：2 条" in text and "编号 1｜" in text and "编号 7｜" in text
         assert "编号 9｜" not in text and "编号 10｜" not in text
         assert "累计有效反馈：2 次" in text and "3天内反馈：1/3" in text
         assert "通过才记录" in text and "未应验也算有效" in text and "原编号保留" in text
         assert not plugin.context.calls
+
+    asyncio.run(run())
+
+
+def test_feedback_handler_keeps_greedy_dispatch_contract_without_default():
+    parameter = inspect.signature(LiuyaoPlugin.liuyao_feedback_command, eval_str=True).parameters[
+        "content"
+    ]
+    assert parameter.annotation is GreedyStr
+    assert parameter.default is inspect.Parameter.empty
+
+
+@pytest.mark.parametrize(
+    "feedback",
+    [
+        "实际项目延期两周，和原断不一致",
+        "项目实际延期了 两 周，合同还没签",
+        "项目延期了\n实际两周后才完成",
+    ],
+)
+def test_numbered_feedback_command_passes_complete_body_to_review(feedback):
+    async def run():
+        plugin, event = setup(decision("case-905"), records=[case(905)])
+        replies = [
+            reply async for reply in plugin.liuyao_feedback_command(event, f"905 {feedback}")
+        ]
+        assert "已闭环" in replies[0]["text"]
+        request = json.loads(plugin.context.calls[0]["prompt"])
+        assert request["case_id"] == "case-905"
+        assert request["feedback"] == feedback
+        assert saved(plugin, 905)["feedback"][0]["text"] == feedback
 
     asyncio.run(run())
 

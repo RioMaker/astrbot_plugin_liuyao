@@ -196,9 +196,11 @@ class LiuyaoPlugin(
     async def liuyao_feedback_command(
         self,
         event: AstrMessageEvent,
-        content: GreedyStr = "",
+        content: GreedyStr,
     ):
         """查看反馈队列，或提交反馈；每个卦例仅在审核通过后闭环。"""
+        # AstrBot replaces annotated types with defaults when parsing commands.
+        # GreedyStr already accepts an empty tail; a default would truncate it.
         reply = await self._feedback_reply(event, str(content or ""))
         if reply:
             yield event.plain_result(reply)
