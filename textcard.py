@@ -111,7 +111,7 @@ class LiuyaoTextCardRenderer:
         verdict: str = "",
         meta: str = "",
         headline: str = "六爻解卦",
-        footer: str = "六爻 · AstrBot",
+        footer: str = "六爻 · 可可子",
         footer_note: str = "卦象为参考，不作定论",
         output_path: str | Path | None = None,
     ) -> Path:
