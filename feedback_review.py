@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import re
+from pathlib import Path
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -15,10 +16,22 @@ if __package__:
     from . import prompts
     from .case_library import normalize_case_store, serialize_case_store
     from .case_store import LIUYAO_CASES_KEY
+    from .feedback_card import (
+        QUEUE_PAGE_SIZE,
+        LiuyaoFeedbackCardRenderer,
+        saved_conclusion,
+        short_time,
+    )
 else:
     import prompts
     from case_library import normalize_case_store, serialize_case_store
     from case_store import LIUYAO_CASES_KEY
+    from feedback_card import (
+        QUEUE_PAGE_SIZE,
+        LiuyaoFeedbackCardRenderer,
+        saved_conclusion,
+        short_time,
+    )
 
 
 OUTCOMES = {"应验", "部分应验", "未应验", "进行中", "未分类"}
@@ -71,7 +84,7 @@ def parse_review_command(raw: str, case_id: str) -> dict[str, Any]:
 
 
 class FeedbackReviewMixin:
-    async def _pending_feedback_cases(self, event) -> list[dict[str, Any]]:
+    async def _own_feedback_cases(self, event) -> list[dict[str, Any]]:
         # Save legacy numbering before displaying it, including its high-water mark.
         async with self._case_lock_instance():
             payload = await self.get_kv_data(LIUYAO_CASES_KEY, {})
@@ -85,11 +98,119 @@ class FeedbackReviewMixin:
                 for case in cases
                 if str(case.get("group_id") or "") == str(event.get_group_id() or "")
                 and str(case.get("caster_id") or "") == str(event.get_sender_id() or "")
-                and str(case.get("analysis") or "").strip()
-                and not feedback_closed(case)
             ),
             key=lambda case: case["serial"],
         )
+
+    async def _pending_feedback_cases(self, event) -> list[dict[str, Any]]:
+        return [
+            case
+            for case in await self._own_feedback_cases(event)
+            if str(case.get("analysis") or "").strip() and not feedback_closed(case)
+        ]
+
+    async def _feedback_command_reply(self, event, content: str) -> str:
+        """Present every command response as a card, with text only on send failure."""
+        try:
+            error = await self._group_gate(event, "liuyao")
+            if error:
+                return await self._feedback_notice(event, error)
+            if not bool(self._config_get("case_library_enabled", True)):
+                return await self._feedback_notice(event, "卦例库已关闭。")
+            text = str(content or "").strip()
+            if re.fullmatch(r"\d{1,12}", text):
+                cases = await self._own_feedback_cases(event)
+                case = next((c for c in cases if c["serial"] == int(text)), None)
+                if case is None:
+                    return await self._feedback_notice(
+                        event, "未找到你在当前群的该编号卦例。\n/反馈 查看队列"
+                    )
+                conclusion = self._plain_text(saved_conclusion(case))
+                status = (
+                    "已反馈"
+                    if feedback_closed(case)
+                    else ("待反馈" if str(case.get("analysis") or "").strip() else "待解读")
+                )
+                fallback = (
+                    f"卦例 {case['serial']} · {status} · {short_time(case.get('created_at'))}\n"
+                    f"所问：{case.get('question') or '未记录问题'}\n原断结论：{conclusion}"
+                )
+                if await self._send_feedback_image(
+                    event,
+                    "render_case",
+                    case=case,
+                    corpus=self.corpus,
+                    conclusion=conclusion,
+                    status=status,
+                ):
+                    return ""
+                return fallback + "\n卦图暂不可用，请稍后重试。"
+            listing = re.fullmatch(r"列表(?:\s+(\d{1,6}))?", text)
+            if text.startswith("列表") and listing is None:
+                return await self._feedback_notice(event, "翻页格式：/反馈 列表 2")
+            pending = await self._pending_feedback_cases(event)
+            # Unnumbered text cannot select among multiple cases: show the queue.
+            if not text or listing or (len(pending) != 1 and not re.match(r"^\d+\s+", text)):
+                page = int(listing[1] or 1) if listing else 1
+                pages = max(1, (len(pending) + QUEUE_PAGE_SIZE - 1) // QUEUE_PAGE_SIZE)
+                if not 1 <= page <= pages:
+                    return await self._feedback_notice(
+                        event, f"页码超出范围，共 {pages} 页。\n/反馈 返回队列"
+                    )
+                visible = pending[(page - 1) * QUEUE_PAGE_SIZE : page * QUEUE_PAGE_SIZE]
+                rules = self._ai_quota_feedback_rules()
+                counts = await self._valid_feedback_counts(
+                    event, {rule["window_days"] for rule in rules}
+                )
+                score = await self._feedback_score(event)
+                rendered = await self._send_feedback_image(
+                    event,
+                    "render_queue",
+                    cases=visible,
+                    total=len(pending),
+                    page=page,
+                    pages=pages,
+                    score=score,
+                    rules=[dict(rule, count=counts.get(rule["window_days"], 0)) for rule in rules],
+                )
+                if rendered:
+                    return ""
+                fallback = await self._feedback_queue(event, visible)
+                return (
+                    f"{fallback}\n第 {page}/{pages} 页，共 {len(pending)} 例；翻页 /反馈 列表 页码"
+                )
+            return await self._feedback_notice(event, await self._feedback_reply(event, text))
+        except Exception as exc:
+            logger.warning("liuyao：反馈图卡处理失败：%r", exc)
+            return await self._feedback_notice(event, "暂时无法读取反馈信息，请稍后重试。")
+
+    async def _feedback_notice(self, event, text: str) -> str:
+        return "" if await self._send_feedback_image(event, "render_notice", text=text) else text
+
+    async def _send_feedback_image(self, event, method: str, **values) -> bool:
+        image_path: Path | None = None
+        try:
+            renderer = getattr(self, "feedback_card", None)
+            if renderer is None:
+                renderer = LiuyaoFeedbackCardRenderer(
+                    font_path=str(self._config_get("chart_font_path", "") or "")
+                )
+                self.feedback_card = renderer
+            image_path = await asyncio.to_thread(getattr(renderer, method), **values)
+            image_path = Path(image_path)
+            if not image_path.is_file() or image_path.stat().st_size <= 0:
+                raise ValueError("未生成有效反馈图片")
+            await event.send(event.image_result(str(image_path.absolute())))
+            return True
+        except Exception as exc:
+            logger.warning("liuyao：反馈图片生成或发送失败：%r", exc)
+            return False
+        finally:
+            if image_path is not None:
+                try:
+                    image_path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("liuyao：清理反馈图片失败：%r", exc)
 
     async def _feedback_progress(self, event) -> str:
         rules = self._ai_quota_feedback_rules()
@@ -105,7 +226,6 @@ class FeedbackReviewMixin:
             )
         if not rules:
             rows.append("当前未配置反馈奖励规则。")
-        rows.append("按最近指定天数滚动统计有效反馈，达标奖励可叠加；超出窗口会重新计算。")
         return "\n".join(rows)
 
     async def _feedback_queue(self, event, pending) -> str:
@@ -114,19 +234,17 @@ class FeedbackReviewMixin:
             cast = case.get("cast") if isinstance(case.get("cast"), dict) else {}
             question = self._clean_short_text(str(case.get("question") or "未记录问题"), 80)
             name = self._clean_short_text(str(cast.get("primary_name") or "卦名未知"), 24)
-            created = self._clean_short_text(str(case.get("created_at") or ""), 32)
+            created = short_time(case.get("created_at"))
             rows.append(f"编号 {case['serial']}｜{created}｜{question}｜{name}")
         if not pending:
             rows.append("当前没有尚未反馈且已完成解读的卦例。")
         example = pending[0]["serial"] if pending else 1
         rows.extend(
             [
-                f"提交：/反馈 {example} 还挺准的，确实已经收到录用通知，薪资与预期一致。",
-                "请按你自己的问题填写真实进展或结果，上述内容仅为格式示例。",
-                "反馈会由独立 AI 对照原问题、排盘和解读审核；未应验也算有效。",
+                f"查看 /反馈 {example}；提交 /反馈 {example} 实际进展或结果。",
+                "未应验也算有效。",
                 "只有审核通过才记录反馈、计入奖励并闭环，每例只能通过一次。",
                 "无关话语、纯感想等会提示原因与补充方式，原编号保留，可继续提交。",
-                "反馈及重试不消耗起卦额度；只有一例时也可使用 /反馈 内容。",
             ]
         )
         rows.append(await self._feedback_progress(event))
@@ -158,13 +276,6 @@ class FeedbackReviewMixin:
                 return await self._feedback_queue(event, pending)
             if len(feedback) > 1000:
                 return "反馈内容请控制在 1000 字以内，再按原编号提交。"
-            caster_name, sender_id = self._caster_identity(event)
-            await self._send_caster_reply(
-                event,
-                sender_id,
-                caster_name,
-                "已收到你的反馈，正在审核；本次不消耗起卦额度。",
-            )
             return await self._submit_case_feedback(event, case, feedback)
         except Exception as exc:
             logger.warning("liuyao：读取反馈队列失败：%r", exc)
@@ -197,10 +308,9 @@ class FeedbackReviewMixin:
                 reason = self._plain_text(decision["reason"])
                 guidance = self._plain_text(decision["guidance"])
                 return (
-                    f"卦例 {case['serial']} 的反馈未通过，仍在待反馈队列。\n"
+                    f"卦例 {case['serial']} · 反馈未通过\n"
                     f"问题：{reason}\n请补充：{guidance}\n"
                     f"重新提交：/反馈 {case['serial']} 补充后的实际进展或结果\n"
-                    "本次不计入有效反馈及奖励，也不消耗起卦额度。"
                 )
             reply = await self._append_case_feedback(
                 event,

@@ -337,15 +337,16 @@ class LiuyaoCaseStoreMixin:
                 score_note = "AI 审核有效，已记入积分。" if reviewed_valid else ""
                 return f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。{score_note}"
             if reviewed_valid is True:
-                score_note = (
-                    f"AI 审核通过，卦例 {case['serial']} 已闭环，累计有效反馈 +1。"
-                    "可发送 /反馈 查看剩余队列及奖励进度。"
-                )
+                score_note = "反馈通过 · 已闭环 · 有效反馈 +1\n/反馈 查看队列与奖励进度"
             elif reviewed_valid is False:
                 score_note = f"AI 审核未判为有效：{review_reason or '未提供可核验的实际进展'}。"
             else:
                 score_note = ""
-            return f"已将反馈写入卦例 {case['id']}（{outcome}）。{score_note}"
+            return (
+                f"卦例 {case['serial']} · {outcome}\n{score_note}"
+                if score_note
+                else f"已将反馈写入卦例 {case['id']}（{outcome}）。"
+            )
         except Exception as exc:
             logger.exception("liuyao：保存卦例反馈失败（%s）：%r", type(exc).__name__, exc)
             return f"卦例反馈保存失败（{type(exc).__name__}）。"

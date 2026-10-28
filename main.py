@@ -72,7 +72,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.25.0"
+PLUGIN_VERSION = "0.26.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -94,7 +94,8 @@ HELP_TEXT = """六爻指令
 /六爻 <内容>：预审并起卦，符合条件时解卦；无额度时只返回卦图。
 /六爻 开、/六爻 关：管理员开启或关闭本群起卦。
 /起卦 六爻 <内容>：起卦入口，同 /六爻。
-/反馈：查看本人待反馈队列、固定编号、反馈逻辑及奖励进度。
+/反馈：图片查看待反馈队列及奖励进度；/反馈 列表 2 翻页。
+/反馈 <编号>：查看原卦图与结论汇总图。
 /反馈 <编号> <内容>：反馈指定卦例；未通过可按原编号补充重试。
 /额度：查询今日余量、反馈积分和恢复时间。
 /ping：检测当前会话的六爻模型。
@@ -196,7 +197,7 @@ class LiuyaoPlugin(
         """查看反馈队列，或提交反馈；每个卦例仅在审核通过后闭环。"""
         # AstrBot replaces annotated types with defaults when parsing commands.
         # GreedyStr already accepts an empty tail; a default would truncate it.
-        reply = await self._feedback_reply(event, str(content or ""))
+        reply = await self._feedback_command_reply(event, str(content or ""))
         if reply:
             yield event.plain_result(reply)
 

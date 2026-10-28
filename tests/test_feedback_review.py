@@ -6,6 +6,7 @@ import inspect
 import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from test_permissions import _Event, _make_enabled_plugin
@@ -106,6 +107,7 @@ def test_bare_command_lists_private_queue_rules_and_does_not_call_ai():
             ]
         )
         payload = plugin._test_store[LIUYAO_CASES_KEY]
+        plugin._send_feedback_image = AsyncMock(return_value=False)
         payload["user_scores"] = {"20002": 2}
         payload["valid_feedback_events"] = {
             "20002": [
@@ -143,6 +145,7 @@ def test_feedback_handler_keeps_greedy_dispatch_contract_without_default():
 def test_numbered_feedback_command_passes_complete_body_to_review(feedback):
     async def run():
         plugin, event = setup(decision("case-905"), records=[case(905)])
+        plugin._send_feedback_image = AsyncMock(return_value=False)
         replies = [
             reply async for reply in plugin.liuyao_feedback_command(event, f"905 {feedback}")
         ]
