@@ -116,18 +116,15 @@ def test_command_weather_fallback(payload):
 
 
 def test_explicit_concrete_intent_is_preserved():
+    from test_agent_analysis import ANALYSIS, prepare
+
     assert parse_intent_and_question("出行 明日暴雨会影响出差吗")[0] == "travel"
-    plugin = _make_enabled_plugin()
-    plugin.config["agent_generate_chart_comment"] = False
-    result = asyncio.run(
-        plugin.cast_liuyao_tool(
-            _Event("member"),
-            intent="出行",
-            question="明日暴雨会影响出差吗",
-        )
-    )
-    assert "# 六爻分类参考：出行" in result
-    assert "# 六爻分类参考：天气" not in result
+    plugin, event = prepare(replies=['{"reject":false,"intent":"出行"}', ANALYSIS])
+    result = asyncio.run(plugin.cast_liuyao_tool(event, question="出行 明日暴雨会影响出差吗"))
+    prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]
+    assert "# 六爻分类参考：出行" in prompt
+    assert "# 六爻分类参考：天气" not in prompt
+    assert "本工具仅返回执行状态" in result
 
 
 def test_agent_weather_image_reference_and_case_roundtrip(tmp_path):
@@ -210,15 +207,15 @@ def test_agent_weather_image_reference_and_case_roundtrip(tmp_path):
 
 
 def test_weather_missing_scope_and_reference_still_returns_cast(tmp_path):
-    plugin = _make_enabled_plugin()
-    plugin.config["agent_generate_chart_comment"] = False
+    from test_agent_analysis import ANALYSIS, prepare
+
+    plugin, event = prepare(replies=['{"reject":false,"intent":"天气"}', ANALYSIS])
     plugin.readings.references = ReferenceLibrary(tmp_path, plugin.readings.directions)
-    text = asyncio.run(
-        plugin.cast_liuyao_tool(_Event("member"), intent="天气", question="明天是否下雨")
-    )
-    assert "本卦：" in text
-    assert "weather.md 未加载" in text
-    assert "缺失先询问" in text
+    result = asyncio.run(plugin.cast_liuyao_tool(event, question="明天是否下雨"))
+    prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]
+    assert "weather.md 未加载" in prompt
+    assert "本工具仅返回执行状态" in result
+    plugin._render_and_send_chart.assert_awaited_once()
 
 
 def test_weather_command_success_is_image_only(tmp_path):
@@ -255,11 +252,12 @@ def test_weather_command_success_is_image_only(tmp_path):
     ],
 )
 def test_each_agent_direction_returns_its_document(intent):
-    plugin = _make_enabled_plugin()
-    plugin.config["agent_generate_chart_comment"] = False
-    text = asyncio.run(
-        plugin.cast_liuyao_tool(_Event("member"), intent=intent, question="这件安排能否按期完成")
-    )
+    from test_agent_analysis import ANALYSIS, prepare
+
+    plugin, event = prepare(replies=[json.dumps({"reject": False, "intent": intent}), ANALYSIS])
+    result = asyncio.run(plugin.cast_liuyao_tool(event, question="这个事项如何推进"))
     label = plugin.readings.directions[intent]["label"]
-    assert f"# 六爻分类参考：{label}" in text
-    assert "# 六爻分类参考：通则" in text
+    prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]
+    assert f"# 六爻分类参考：{label}" in prompt
+    assert "# 六爻分类参考：通则" in prompt
+    assert "# 六爻分类参考" not in result

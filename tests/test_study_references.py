@@ -181,7 +181,8 @@ def test_missing_notes_do_not_break_casting_or_private_archive_permissions(tmp_p
     result = asyncio.run(
         plugin.cast_liuyao_tool(_Event("member"), intent="weather", question="明天杭州是否下雨")
     )
-    assert "本卦：" in result and "lookup_liuyao_reference" in result
+    assert "本工具仅返回执行状态" in result
+    assert "cast_policy:20002" in plugin._test_store
     assert "未加载" in asyncio.run(plugin.lookup_liuyao_reference_tool(_Event("member"), "天气"))
     assert "仅 AstrBot 管理员" in asyncio.run(plugin._case_browser(_Event("member"), ""))
 

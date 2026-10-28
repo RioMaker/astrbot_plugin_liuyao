@@ -130,7 +130,7 @@ class CastPolicyMixin:
                 return None, "起卦记录读取或保存失败，本次未返回新卦，请稍后重试。"
         return cast, ""
 
-    async def _reuse_cast(self, event, *, for_agent=False):
+    async def _reuse_cast(self, event, *, for_agent=False, question=""):
         error = await self._group_gate(event, "liuyao")
         if error:
             return error
@@ -152,20 +152,19 @@ class CastPolicyMixin:
                 cast_at = datetime.fromtimestamp(last["timestamp"], BEIJING)
             except (KeyError, TypeError, ValueError, OverflowError, OSError):
                 cast_at = None
+            cast = CastResult(tuple(last["lines"]), cast_at=cast_at, chart=last.get("chart"))
+            if for_agent:
+                return await self._content_reply(event, question, original=last, original_cast=cast)
             reading = self.readings.render(
-                CastResult(tuple(last["lines"]), cast_at=cast_at, chart=last.get("chart")),
+                cast,
                 intent=last["intent"],
                 question=last["question"],
                 method=last["method"],
                 for_agent=for_agent,
             )
-            if for_agent:
-                error = await self._claim_ai_daily(event)
-                if error:
-                    return error
             return (
                 "复用原卦：仅复用六爻原卦，不重新起六爻卦、不占起卦频率次数。"
-                + ("本消息已通过 AI 日额度检查。\n" if for_agent else "本地查看不占 AI 日额度。\n")
+                + "本地查看不占 AI 日额度。\n"
                 + f"原卦时间：{cast_at.isoformat(timespec='seconds') if cast_at else '未知'}\n"
                 + reading
             )

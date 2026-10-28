@@ -233,7 +233,7 @@ def test_source_registers_flat_commands_and_agent_tools() -> None:
     assert '@filter.llm_tool(name="lookup_zhouyi_text")' in source
     assert '@filter.llm_tool(name="search_liuyao_cases")' in source
     assert '@filter.llm_tool(name="record_liuyao_feedback")' in source
-    assert "@filter.on_agent_done()" in source
+    assert "@filter.on_agent_done()" not in source
     assert "QQ 群主、QQ 群管理员或 AstrBot 管理员" in source
     compile(source, str(ROOT / "main.py"), "exec")
 

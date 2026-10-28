@@ -212,6 +212,12 @@ def _make_plugin(config: dict, context=None) -> LiuyaoPlugin:
     return plugin
 
 
+async def _run_content(plugin, event, question, *, via_tool):
+    if via_tool:
+        return await plugin.cast_liuyao_tool(event, question=question)
+    return await plugin._content_reply(event, question)
+
+
 # ----------------------------------------------------------------------
 # Prompt visibility, editing and restoring the default
 # ----------------------------------------------------------------------
@@ -264,9 +270,7 @@ def test_custom_prompt_is_kept_and_placeholders_are_substituted() -> None:
 
 def test_constructor_writes_prompt_defaults_into_the_config() -> None:
     plugin = LiuyaoPlugin(_Context(), _Config({"ai_daily_limit": 0}))
-    assert (
-        plugin.config["command_interpretation_prompt"] == prompts.INTERPRETATION_PROMPT
-    )
+    assert plugin.config["command_interpretation_prompt"] == prompts.INTERPRETATION_PROMPT
     assert plugin.config.saved == 1
 
 
@@ -374,7 +378,8 @@ def _review_json() -> str:
     return json.dumps({"reject": False, "reason": "可以分类", "intent": "事业"})
 
 
-def test_long_reply_is_sent_as_a_card(tmp_path) -> None:
+@pytest.mark.parametrize("via_tool", [False, True])
+def test_long_reply_is_sent_as_a_card(tmp_path, via_tool) -> None:
     png = tmp_path / "card.png"
     png.write_bytes(b"png")
     context = _Context([_review_json(), LONG_ANALYSIS])
@@ -391,7 +396,7 @@ def test_long_reply_is_sent_as_a_card(tmp_path) -> None:
     plugin.text_card = card
     event = _Event()
 
-    asyncio.run(plugin._content_reply(event, "今年适合换工作吗"))
+    asyncio.run(_run_content(plugin, event, "今年适合换工作吗", via_tool=via_tool))
 
     assert card.kwargs is not None
     assert card.kwargs["question"] == "今年适合换工作吗"
@@ -404,7 +409,8 @@ def test_long_reply_is_sent_as_a_card(tmp_path) -> None:
     )
 
 
-def test_interpretation_prompt_carries_the_char_budget(tmp_path) -> None:
+@pytest.mark.parametrize("via_tool", [False, True])
+def test_interpretation_prompt_carries_the_char_budget(tmp_path, via_tool) -> None:
     png = tmp_path / "card.png"
     png.write_bytes(b"png")
     context = _Context([_review_json(), LONG_ANALYSIS])
@@ -417,14 +423,15 @@ def test_interpretation_prompt_carries_the_char_budget(tmp_path) -> None:
         },
         context,
     )
-    asyncio.run(plugin._content_reply(_Event(), "今年适合换工作吗"))
+    asyncio.run(_run_content(plugin, _Event(), "今年适合换工作吗", via_tool=via_tool))
 
     interpretation = context.prompts[-1]
     assert "不超过 180 字" in interpretation
     assert "断语：" in interpretation
 
 
-def test_card_failure_falls_back_to_plain_text(tmp_path) -> None:
+@pytest.mark.parametrize("via_tool", [False, True])
+def test_card_failure_falls_back_to_plain_text(tmp_path, via_tool) -> None:
     context = _Context([_review_json(), LONG_ANALYSIS])
     plugin = _make_plugin(
         {
@@ -438,7 +445,7 @@ def test_card_failure_falls_back_to_plain_text(tmp_path) -> None:
     plugin.text_card = _FakeCard(fail=True)
     event = _Event()
 
-    asyncio.run(plugin._content_reply(event, "今年适合换工作吗"))
+    asyncio.run(_run_content(plugin, event, "今年适合换工作吗", via_tool=via_tool))
 
     chains = [item["chain"] for item in event.sent if "chain" in item]
     assert chains, "回退时应发送纯文本"
@@ -447,7 +454,8 @@ def test_card_failure_falls_back_to_plain_text(tmp_path) -> None:
     assert any("君子豹变" in text for text in texts)
 
 
-def test_short_reply_stays_plain_text_when_mode_is_long_only() -> None:
+@pytest.mark.parametrize("via_tool", [False, True])
+def test_short_reply_stays_plain_text_when_mode_is_long_only(via_tool) -> None:
     short = "断：成。\n本卦风天小畜二爻动，宜借熟人引荐。\n断语：本周内可定。"
     context = _Context([_review_json(), short])
     plugin = _make_plugin(
@@ -462,7 +470,7 @@ def test_short_reply_stays_plain_text_when_mode_is_long_only() -> None:
     plugin.text_card = _FakeCard()
     event = _Event()
 
-    asyncio.run(plugin._content_reply(event, "这个项目能否在月底前签约"))
+    asyncio.run(_run_content(plugin, event, "这个项目能否在月底前签约", via_tool=via_tool))
 
     chains = [item["chain"] for item in event.sent if "chain" in item]
     assert not any(isinstance(part, _Image) for chain in chains for part in chain)

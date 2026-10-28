@@ -2,7 +2,7 @@
   "agent_tools_enabled": {
     "type": "bool",
     "description": "允许 AI 直接使用六爻插件",
-    "hint": "默认开启。关闭后 AI 仅能查询插件指令并指导用户使用，不能直接起卦、复解、查询资料或卦例、提交反馈。用户亲自发送 /六爻、/反馈 等指令的流程及其 AI 预审、解读不受影响。",
+    "hint": "默认开启。AI 仅代用户调用插件，起卦与 /六爻 共用预审、解读、额度、发图及留档流程，主 AI 不自行解卦。关闭后只提供指令帮助；用户手动指令不受影响。",
     "default": true
   },
   "default_enabled": {
@@ -168,21 +168,21 @@
   },
   "agent_chart_comment_prompt": {
     "type": "text",
-    "description": "Agent 起卦图卡短评提示词",
+    "description": "[旧配置] Agent 起卦图卡短评提示词",
     "default": "",
-    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {agent_name}、{intent_instruction}、{available_intents}、{question}、{chart_reading}、{reference_context}。插件仍会追加短评 JSON 格式要求。"
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。清空保存即恢复内置默认。"
   },
   "agent_recovery_prompt": {
     "type": "text",
-    "description": "Agent 空回复时的原卦补解提示词",
+    "description": "[旧配置] Agent 空回复时的原卦补解提示词",
     "default": "",
-    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {readings}。插件仍会要求依据现有原卦补解并以纯文本回复。"
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。清空保存即恢复内置默认。"
   },
   "agent_final_reply_prompt": {
     "type": "text",
-    "description": "Agent 解卦最终回复补充要求",
+    "description": "[旧配置] Agent 解卦最终回复补充要求",
     "default": "",
-    "hint": "本项没有内置默认正文，留空表示不追加额外要求。可填写附加解卦要求，可用变量 {intent}、{question}、{chart_status}；插件仍会追加纯文本格式要求。"
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。"
   },
   "case_library_enabled": {
     "type": "bool",
@@ -210,8 +210,8 @@
   },
   "agent_send_chart_image": {
     "type": "bool",
-    "description": "Agent 起卦时先发送六爻信息图",
-    "hint": "默认开启。图片包含卦象、动爻、起卦人、群号、时间、问题及古籍卦爻辞。",
+    "description": "[旧配置] Agent 起卦时先发送六爻信息图",
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。",
     "default": true
   },
   "command_send_chart_image": {
@@ -222,26 +222,26 @@
   },
   "agent_generate_chart_comment": {
     "type": "bool",
-    "description": "Agent 起卦后调用当前会话模型生成图中短评",
-    "hint": "默认开启。模型会在成卦后生成简短审慎评语；若用户未给方向，也会根据问题补全方向。",
+    "description": "[旧配置] Agent 起卦后调用当前会话模型生成图中短评",
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。",
     "default": true
   },
   "agent_display_name": {
     "type": "string",
-    "description": "AI 短评默认署名",
-    "hint": "当 Agent 调用工具时未主动传入自身名字，使用此值，例如“可可子”。",
+    "description": "[旧配置] AI 短评默认署名",
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。",
     "default": "AI助手"
   },
   "agent_comment_timeout_seconds": {
     "type": "int",
-    "description": "生成图中 AI 短评的超时秒数",
-    "hint": "允许范围 5-90；超时或模型失败时自动使用本地保守提示，不影响发图和文字解卦。",
+    "description": "[旧配置] 生成图中 AI 短评的超时秒数",
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。",
     "default": 45
   },
   "agent_analysis_timeout_seconds": {
     "type": "int",
-    "description": "Agent 空回复后补解原卦的超时秒数",
-    "hint": "允许范围 10-180，默认 90。仅在本轮起卦后 Agent 没有正文时调用当前模型补解一次，不重新起卦；失败会发送提示。",
+    "description": "[旧配置] Agent 空回复后补解原卦的超时秒数",
+    "hint": "仅为旧配置兼容保留。AI 工具现与指令共用插件预审、解读和发送流程，不再使用此项。",
     "default": 90
   },
   "chart_font_path": {

@@ -49,6 +49,7 @@ class LiuyaoCaseStoreMixin:
         method: str,
         cast_at: datetime,
         track_agent: bool = True,
+        reuse_existing: bool = False,
     ) -> tuple[str, str, str]:
         if not bool(self._config_get("case_library_enabled", True)):
             return "", "", "卦例库已由配置关闭。"
@@ -63,6 +64,17 @@ class LiuyaoCaseStoreMixin:
             async with self._case_lock_instance():
                 payload = await get_data(LIUYAO_CASES_KEY, {})
                 cases = normalize_case_store(payload)
+                if reuse_existing:
+                    for existing in cases:
+                        if (
+                            existing.get("group_id") == group_id
+                            and existing.get("caster_id") == caster_id
+                            and existing.get("created_at") == cast_at.isoformat()
+                            and existing.get("cast", {}).get("lines") == list(cast.lines)
+                        ):
+                            # Keep the first prediction and its feedback queue intact.
+                            case_id = "" if existing.get("analysis") else str(existing["id"])
+                            return case_id, "", "复用原卦例；已有原断保持不变。"
                 references = search_cases(
                     cases,
                     group_id=group_id,
