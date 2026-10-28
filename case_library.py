@@ -36,7 +36,8 @@ def normalize_case_store(payload: Any) -> list[dict[str, Any]]:
 
 
 def serialize_case_store(
-    cases: Iterable[dict[str, Any]], previous: Any = None,
+    cases: Iterable[dict[str, Any]],
+    previous: Any = None,
 ) -> dict[str, Any]:
     records = list(cases)
     next_serial = max(
@@ -79,7 +80,9 @@ def search_cases(
         # 未收到任何实际反馈的卦例不作为解卦参考，避免未经验证的旧断影响新判断。
         feedback = case.get("feedback")
         if not isinstance(feedback, list) or not any(
-            isinstance(item, dict) and str(item.get("text") or "").strip()
+            isinstance(item, dict)
+            and item.get("valid") is not False
+            and str(item.get("text") or "").strip()
             for item in feedback
         ):
             continue
@@ -98,9 +101,7 @@ def search_cases(
         if changed_number and _safe_int(cast.get("changed_number")) == changed_number:
             score += 3.0
         existing_moving = {
-            _safe_int(value)
-            for value in cast.get("moving_lines", [])
-            if _safe_int(value)
+            _safe_int(value) for value in cast.get("moving_lines", []) if _safe_int(value)
         }
         if wanted_moving and existing_moving:
             score += min(3.0, len(wanted_moving & existing_moving) * 1.5)
@@ -150,7 +151,7 @@ def format_case_references(cases: Iterable[dict[str, Any]]) -> str:
         feedback = [
             item
             for item in case.get("feedback", [])
-            if isinstance(item, dict) and item.get("text")
+            if isinstance(item, dict) and item.get("valid") is not False and item.get("text")
         ]
         evidence = "；".join(
             [
@@ -178,11 +179,7 @@ def format_case_references(cases: Iterable[dict[str, Any]]) -> str:
                 f"卦爻据：{_short(evidence, 300) if evidence else '未记录'}",
                 "原断："
                 + _short(
-                    str(
-                        case.get("verdict")
-                        or case.get("analysis")
-                        or "尚未记录"
-                    ),
+                    str(case.get("verdict") or case.get("analysis") or "尚未记录"),
                     350,
                 ),
                 (

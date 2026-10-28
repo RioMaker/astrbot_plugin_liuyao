@@ -224,6 +224,7 @@ class LiuyaoCaseStoreMixin:
         shefu_only: bool = False,
         reviewed_valid: bool | None = None,
         review_reason: str = "",
+        review_command: dict[str, Any] | None = None,
     ) -> str:
         if not bool(self._config_get("case_library_enabled", True)):
             return "卦例库已由配置关闭。"
@@ -231,6 +232,11 @@ class LiuyaoCaseStoreMixin:
         put_data = getattr(self, "put_kv_data", None)
         if not callable(get_data) or not callable(put_data):
             return "AstrBot 持久化接口不可用，反馈未保存。"
+        if reviewed_valid is False:
+            return (
+                f"反馈未通过：{review_reason or '请补充与原问题相关的真实进展或结果'}。"
+                "尚未记录反馈，请用 /反馈 查看原编号并补充重试。"
+            )
         group_id = str(event.get_group_id() or "").strip()
         caster_id = str(event.get_sender_id() or "").strip()
         try:
@@ -266,8 +272,15 @@ class LiuyaoCaseStoreMixin:
                     eligible,
                     key=lambda item: str(item.get("created_at") or ""),
                 )
+                rejected_rows = [
+                    dict(item)
+                    for item in case.get("feedback", [])
+                    if isinstance(item, dict) and item.get("valid") is False
+                ]
                 feedback_rows = [
-                    dict(item) for item in case.get("feedback", []) if isinstance(item, dict)
+                    dict(item)
+                    for item in case.get("feedback", [])
+                    if isinstance(item, dict) and item.get("valid") is not False
                 ]
                 if feedback_rows:
                     return f"卦例 {case['serial']:03d} 已反馈过，每个卦例只能反馈一次。"
@@ -282,6 +295,10 @@ class LiuyaoCaseStoreMixin:
                 if reviewed_valid is not None:
                     feedback_item["valid"] = reviewed_valid
                     feedback_item["review_reason"] = review_reason[:300]
+                if review_command is not None:
+                    feedback_item["review_command"] = review_command
+                if rejected_rows:
+                    case["legacy_rejected_feedback"] = rejected_rows
                 feedback_rows.append(feedback_item)
                 case["feedback"] = feedback_rows[-20:]
                 if answer and case.get("intent") == "shefu":
@@ -306,12 +323,12 @@ class LiuyaoCaseStoreMixin:
                 await put_data(LIUYAO_CASES_KEY, updated_payload)
             if answer and case.get("intent") == "shefu":
                 score_note = "AI 审核有效，已记入积分。" if reviewed_valid else ""
-                return (
-                    f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。"
-                    f"{score_note}"
-                )
+                return f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。{score_note}"
             if reviewed_valid is True:
-                score_note = "AI 审核有效，已记入积分。"
+                score_note = (
+                    f"AI 审核通过，卦例 {case['serial']} 已闭环，累计有效反馈 +1。"
+                    "可发送 /反馈 查看剩余队列及奖励进度。"
+                )
             elif reviewed_valid is False:
                 score_note = f"AI 审核未判为有效：{review_reason or '未提供可核验的实际进展'}。"
             else:
@@ -345,6 +362,9 @@ class LiuyaoCaseStoreMixin:
         existing = ledger.get(caster_id)
         if isinstance(existing, list):
             values = [str(value) for value in existing]
+            # One locked successful case closure is one event. Distinct cases
+            # can have the same clock timestamp, especially on Windows.
+            values.append(observed_at)
         else:
             values = []
             for case in cases:
@@ -360,8 +380,8 @@ class LiuyaoCaseStoreMixin:
                     timestamp = str(feedback.get("observed_at") or "").strip()
                     if reporter_id == caster_id and timestamp:
                         values.append(timestamp)
-        if observed_at not in values:
-            values.append(observed_at)
+            if observed_at not in values:
+                values.append(observed_at)
 
         now = datetime.now().astimezone()
         cutoff = now - timedelta(days=3650)

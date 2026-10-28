@@ -164,7 +164,7 @@
     "type": "text",
     "description": "卦例反馈审核提示词",
     "default": "",
-    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {question}、{hexagram}、{verdict}、{feedback}。插件仍会追加 JSON 格式要求。"
+    "hint": "留空恢复内置默认提示词。可用变量 {question}、{hexagram}、{verdict}、{feedback}；为复用审核前缀，{feedback} 指向本轮用户消息，实际内容经独立消息传入。插件追加严格 JSON 协议；同一卦例保留最初提示词和最近 8 轮审核上下文。"
   },
   "agent_chart_comment_prompt": {
     "type": "text",
@@ -187,7 +187,7 @@
   "case_library_enabled": {
     "type": "bool",
     "description": "启用六爻卦例库",
-    "hint": "Agent 起卦及默认指令完成 AI 解读后自动留档；群内射覆揭晓继续自动记录。/反馈 可提交本人待反馈卦例。",
+    "hint": "默认指令和 Agent 完成解读后自动留档；群内射覆揭晓继续自动记录。/反馈 查看本人当前群待反馈队列、固定编号和奖励进度；审核通过才记录并闭环，未通过可继续补充。",
     "default": true
   },
   "case_library_max_records": {

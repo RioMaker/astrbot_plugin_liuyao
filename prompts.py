@@ -35,7 +35,8 @@ INTERPRETATION_PROMPT = (
 FEEDBACK_REVIEW_PROMPT = (
     "判断反馈是否提供与原问题、原断相关且可理解的实际进展或结果。明确未应验也算有效；"
     "纯感想、追问、无关、无法辨认或只重复原断而无实际进展，判无效。不要以预测是否正确"
-    "作为有效性标准。\n原问题：{question}\n本卦：{hexagram}\n原断：{verdict}\n"
+    "作为有效性标准。结合本卦例历史补充审核；不合格时指出具体问题及应补充的真实情况，"
+    "不要求用户迎合原断。\n原问题：{question}\n本卦：{hexagram}\n原断：{verdict}\n"
     "用户反馈：<feedback>{feedback}</feedback>"
 )
 
