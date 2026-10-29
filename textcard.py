@@ -23,7 +23,7 @@ try:
         TITLE_FONT_PATH,
         ChartRenderError,
         draw_bamboo_background,
-        draw_travel_logo,
+        draw_taiji_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover - direct local execution
         TITLE_FONT_PATH,
         ChartRenderError,
         draw_bamboo_background,
-        draw_travel_logo,
+        draw_taiji_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -237,7 +237,7 @@ class LiuyaoTextCardRenderer:
         self, draw: ImageDraw.ImageDraw, *, headline: str, subtitle: str, meta: str
     ) -> None:
         top = _TOP_PAD
-        draw_travel_logo(draw, MARGIN, top + 8, width=76, height=76)
+        draw_taiji_logo(draw, MARGIN, top + 8, width=76, height=76)
 
         title_font = self._font(SIZES["title"], heading=True)
         _text(draw, MARGIN + 116, top + 2, headline, title_font, JADE)

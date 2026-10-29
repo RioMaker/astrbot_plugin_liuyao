@@ -15,6 +15,50 @@ from divination import CastResult  # noqa: E402
 from renderer import ELEMENT_COLORS, INK, SPIRIT_COLORS, LiuyaoImageRenderer  # noqa: E402
 
 
+@pytest.mark.parametrize("saved_position", [None, 2])
+def test_default_remark_uses_primary_hexagram_and_actual_chart_position(
+    tmp_path, monkeypatch, saved_position
+):
+    from paipan import chart_for
+
+    cast = CastResult((9, 7, 7, 7, 7, 7))
+    chart = chart_for(cast)
+    if saved_position is not None:
+        chart["shi"] = saved_position
+        cast = CastResult(cast.lines, chart=chart)
+    requested = []
+    texts = []
+
+    def preset(number, position):
+        requested.append((number, position))
+        return "龙可飞天，莫顶破天。"
+
+    original = ImageDraw.ImageDraw.text
+
+    def record(self, xy, text, *args, **kwargs):
+        texts.append(text)
+        return original(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr("renderer.get_shi_remark", preset)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", record)
+    LiuyaoImageRenderer(ZhouyiCorpus(ROOT / "data/zhouyi.json")).render(
+        cast,
+        caster_name="测试",
+        caster_id="20002",
+        group_id="10001",
+        intent_label="综合",
+        question="测试主卦世位",
+        method="手动铜币",
+        cast_at=None,
+        output_path=tmp_path / "remark.png",
+    )
+    assert cast.primary_number != cast.changed_number
+    assert requested == [(cast.primary_number, chart["shi"])]
+    assert "龙可飞天，莫顶破天。" in texts
+    assert any(text.startswith("先人小语 · 乾卦 · 世居") for text in texts)
+    assert not any("AI助手：" in text or "卦象已成" in text for text in texts)
+
+
 def test_renderer_creates_detailed_png(tmp_path) -> None:
     corpus = ZhouyiCorpus(ROOT / "data" / "zhouyi.json")
     renderer = LiuyaoImageRenderer(corpus)

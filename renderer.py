@@ -15,11 +15,13 @@ try:
     from .divination import CastResult
     from .najia import BRANCH_ELEMENTS
     from .paipan import beijing_time, chart_for
+    from .shi_remarks import get_shi_remark
 except ImportError:  # pragma: no cover - direct local execution
     from corpus import ZhouyiCorpus
     from divination import CastResult
     from najia import BRANCH_ELEMENTS
     from paipan import beijing_time, chart_for
+    from shi_remarks import get_shi_remark
 
 WIDTH = 1240
 MARGIN = 60
@@ -30,22 +32,27 @@ ACCENT = "#B34F40"
 JADE = "#234A3B"
 PANEL = "#EAEEDF"
 RULE = "#D5DCCB"
-# 旅卦（第 56 卦）：上离下艮，按上爻到初爻绘制。
-TRAVEL_HEXAGRAM_TOP_DOWN = (1, 0, 1, 1, 0, 0)
 
 
-def draw_travel_logo(draw, x, y, *, width=52, height=50, color=JADE):
-    """Draw the shared six-line title mark used by every command image."""
-    stroke = max(2, round(height / 10))
-    step = (height - stroke) / 5
-    for index, yang in enumerate(TRAVEL_HEXAGRAM_TOP_DOWN):
-        top = y + round(index * step)
-        bottom = top + stroke - 1
-        if yang:
-            draw.rectangle((x, top, x + width - 1, bottom), fill=color)
-        else:
-            draw.rectangle((x, top, x + round(width * 0.4) - 1, bottom), fill=color)
-            draw.rectangle((x + round(width * 0.6), top, x + width - 1, bottom), fill=color)
+def draw_taiji_logo(draw, x, y, *, width=52, height=50, color=JADE):
+    """Draw a round, antialiased yin-yang mark shared by all command titles."""
+    size = max(8, round(min(width, height)))
+    scale = 4
+    extent = size * scale
+    mask = Image.new("L", (extent, extent), 0)
+    symbol = ImageDraw.Draw(mask)
+    edge = extent - 1
+    symbol.pieslice((0, 0, edge, edge), 90, 270, fill=255)
+    symbol.ellipse((extent / 4, 0, extent * 3 / 4, extent / 2), fill=255)
+    symbol.ellipse((extent / 4, extent / 2, extent * 3 / 4, edge), fill=0)
+    eye = extent / 12
+    for cy, fill in ((extent / 4, 0), (extent * 3 / 4, 255)):
+        symbol.ellipse((extent / 2 - eye, cy - eye, extent / 2 + eye, cy + eye), fill=fill)
+    symbol.ellipse((0, 0, edge, edge), outline=255, width=scale)
+    mask = mask.resize((size, size), Image.Resampling.LANCZOS)
+    left, top = round(x + (width - size) / 2), round(y + (height - size) / 2)
+    draw.ellipse((left, top, left + size - 1, top + size - 1), fill=PAPER)
+    draw.bitmap((left, top), mask, fill=color)
 
 
 ELEMENT_COLORS = {
@@ -226,7 +233,7 @@ class LiuyaoImageRenderer:
         cast_at: datetime | None,
         agent_name: str = "AI助手",
         ai_comment: str = "",
-        comment_title: str = "AI短评",
+        comment_title: str = "先人小语",
         output_path: str | Path | None = None,
     ) -> Path:
         primary = self.corpus.get(cast.primary_number)
@@ -277,16 +284,16 @@ class LiuyaoImageRenderer:
             for label, value in self._detail_rows(primary, changed, cast)
         ]
         details_height = 76 + sum(max(1, len(lines)) * 40 + 24 for _, lines in details)
-        comment_lines = wrap(
-            f"{self._clean(agent_name) or 'AI助手'}："
-            + (
-                str(ai_comment or "").replace("\x00", "").strip()
-                or "卦象已成，当察动静、辨时位而取其宜。"
-            ),
-            f["body"],
-            1064,
-        )
-        comment_heading = wrap(self._clean(comment_title) or "排盘提示", f["body"], 1064)
+        comment = str(ai_comment or "").replace("\x00", "").strip()
+        if comment:
+            comment = f"{self._clean(agent_name) or 'AI助手'}：{comment}"
+            heading = self._clean(comment_title) or "排盘提示"
+        else:
+            comment = get_shi_remark(cast.primary_number, chart.get("shi"))
+            position = LINE_LABELS.get(chart.get("shi"), "未定")
+            heading = f"先人小语 · {primary['name']}卦 · 世居{position}"
+        comment_lines = wrap(comment, f["body"], 1064)
+        comment_heading = wrap(heading, f["body"], 1064)
         comment_height = 48 + len(comment_heading) * 40 + len(comment_lines) * 40
         # Each section owns its measured height. Long questions/射覆分析 grow the canvas.
         height = (
@@ -367,7 +374,7 @@ class LiuyaoImageRenderer:
         return path
 
     def _draw_header(self, draw, primary, changed, cast, chart, cast_at, f):
-        draw_travel_logo(draw, MARGIN, 45, width=72, height=72)
+        draw_taiji_logo(draw, MARGIN, 45, width=72, height=72)
         self._text(draw, MARGIN + 100, 45, "六爻排盘", f["title"], JADE)
         stamp = cast_at.strftime("%Y-%m-%d %H:%M:%S") if cast_at else "原起卦时间未知"
         zone = "北京时间 UTC+8" if cast_at and cast_at.tzinfo else "原时间未注明时区"

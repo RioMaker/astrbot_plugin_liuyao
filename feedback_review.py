@@ -179,7 +179,32 @@ class FeedbackReviewMixin:
                 return (
                     f"{fallback}\n第 {page}/{pages} 页，共 {len(pending)} 例；翻页 /反馈 列表 页码"
                 )
-            return await self._feedback_notice(event, await self._feedback_reply(event, text))
+            reply = await self._feedback_reply(event, text)
+            # Only the exact receipt emitted after persistence selects the success card.
+            # Reviewer prose and user input must never be interpreted as success markers.
+            accepted = re.fullmatch(
+                r"卦例 (\d{1,12}) · (应验|部分应验|未应验|进行中|未分类)\n"
+                r"反馈通过 · 已闭环 · 有效反馈 \+1\n/反馈 查看队列与奖励进度",
+                reply,
+            )
+            if accepted:
+                try:
+                    score = await self._feedback_score(event)
+                except Exception as exc:
+                    # The receipt already confirms persistence; a summary read must
+                    # not turn that successful submission into a failure message.
+                    logger.warning("liuyao：反馈已保存，累计次数暂不可读：%r", exc)
+                    score = None
+                if await self._send_feedback_image(
+                    event,
+                    "render_success",
+                    case_number=int(accepted[1]),
+                    outcome=accepted[2],
+                    score=score,
+                ):
+                    return ""
+                return reply
+            return await self._feedback_notice(event, reply)
         except Exception as exc:
             logger.warning("liuyao：反馈图卡处理失败：%r", exc)
             return await self._feedback_notice(event, "暂时无法读取反馈信息，请稍后重试。")

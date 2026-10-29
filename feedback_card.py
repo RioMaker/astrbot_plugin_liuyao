@@ -23,7 +23,7 @@ try:
         WIDTH,
         LiuyaoImageRenderer,
         draw_bamboo_background,
-        draw_travel_logo,
+        draw_taiji_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover
         WIDTH,
         LiuyaoImageRenderer,
         draw_bamboo_background,
-        draw_travel_logo,
+        draw_taiji_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -112,7 +112,7 @@ class LiuyaoFeedbackCardRenderer:
         canvas = Image.new("RGB", (WIDTH, height), PAPER)
         draw_bamboo_background(canvas, WIDTH)
         draw = ImageDraw.Draw(canvas)
-        draw_travel_logo(draw, MARGIN, 49)
+        draw_taiji_logo(draw, MARGIN, 49)
         self._text(draw, MARGIN + 78, 49, title, 46, JADE)
         if meta:
             draw.text((WIDTH - MARGIN, 64), meta, font=self._font(24), fill=MUTED, anchor="rt")
@@ -143,6 +143,43 @@ class LiuyaoFeedbackCardRenderer:
             y += 22
         return self._save(canvas, output_path)
 
+    def render_success(self, *, case_number, outcome, score=None, output_path=None) -> Path:
+        """Celebrate one persisted, accepted feedback, without implying extra rewards."""
+        canvas, draw = self._canvas(690, "反馈成功", f"卦例 {case_number}")
+        green = "#27704E"
+        pale = "#E7EEDC"
+        gold = "#D4B978"
+        draw.rounded_rectangle((MARGIN, 140, WIDTH - MARGIN, 570), radius=24, fill=JADE)
+        # A drawn check avoids missing or differently styled emoji glyphs.
+        cx, cy, radius = 230, 307, 92
+        draw.ellipse((cx - 109, cy - 109, cx + 109, cy + 109), outline="#476957", width=2)
+        draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=pale)
+        draw.line(
+            ((cx - 40, cy), (cx - 9, cy + 29), (cx + 45, cy - 30)),
+            fill=green,
+            width=15,
+            joint="curve",
+        )
+        for px, py, length in ((139, 191, 8), (337, 228, 6), (325, 400, 8)):
+            draw.line((px - length, py, px + length, py), fill=gold, width=3)
+            draw.line((px, py - length, px, py + length), fill=gold, width=3)
+        self._text(draw, 390, 195, "反馈通过", 60, PAPER)
+        self._text(draw, 393, 279, f"{outcome} · 本例已闭环", 29, "#CAD9C8")
+        draw.line((392, 338, WIDTH - MARGIN - 48, 338), fill="#476957", width=1)
+        self._text(draw, 393, 380, "有效反馈", 35, PAPER)
+        self._text(draw, 600, 355, "+1", 112, gold)
+        if score is not None:
+            self._text(draw, 395, 502, f"累计有效反馈 {score} 次", 27, "#CAD9C8")
+        self._text(draw, MARGIN, 609, "一卦有始有终，多谢回来报信。", 29, JADE)
+        draw.text(
+            (WIDTH - MARGIN, 613),
+            "/反馈 查看队列与奖励",
+            font=self._font(25),
+            fill=MUTED,
+            anchor="rt",
+        )
+        return self._save(canvas, output_path)
+
     def render_queue(self, *, cases, total, page, pages, score, rules, output_path=None) -> Path:
         rows = []
         for case in cases:
@@ -152,12 +189,21 @@ class LiuyaoFeedbackCardRenderer:
                 limit=2,
             )
             rows.append((case, lines, 60 + len(lines) * 44))
-        height = 190 + sum(row[2] for row in rows) + 156 + len(rules) * 72 + 170
+        height = 248 + sum(row[2] for row in rows) + 156 + len(rules) * 72 + 170
         if not rows:
             height += 82
         canvas, draw = self._canvas(height, "待反馈", f"共 {total} 例 · {page}/{pages} 页")
         self._text(draw, MARGIN, 119, "查看卦例与原断，再填写实际进展", 25, MUTED)
-        y = 172
+        draw.rounded_rectangle((MARGIN, 166, WIDTH - MARGIN, 209), radius=8, fill=PANEL)
+        draw.text(
+            (MARGIN + QUEUE_NUMBER_WIDTH / 2, 176),
+            "序号",
+            font=self._font(24),
+            fill=JADE,
+            anchor="mt",
+        )
+        self._text(draw, MARGIN + QUEUE_TEXT_OFFSET, 176, "问题", 24, JADE)
+        y = 230
         for case, lines, row_height in rows:
             number_height = 52
             draw.rounded_rectangle(

@@ -72,7 +72,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.26.3"
+PLUGIN_VERSION = "0.27.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -1070,8 +1070,8 @@ class LiuyaoPlugin(
                 method=method,
                 cast_at=cast.cast_at,
                 agent_name="六爻解读",
-                ai_comment=self._fallback_chart_comment(cast),
-                comment_title="卦象提示",
+                ai_comment="",
+                comment_title="先人小语",
                 enabled_key="command_send_chart_image",
                 source="指令",
             )

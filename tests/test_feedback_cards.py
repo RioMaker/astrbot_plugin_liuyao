@@ -28,6 +28,10 @@ class RecordingCard(LiuyaoFeedbackCardRenderer):
         self.calls.append(("notice", {"text": text}))
         return super().render_notice(text, **kwargs)
 
+    def render_success(self, **kwargs):
+        self.calls.append(("success", copy.deepcopy(kwargs)))
+        return super().render_success(**kwargs)
+
     def render_case(self, **kwargs):
         self.calls.append(
             ("case", {key: value for key, value in kwargs.items() if key != "corpus"})
@@ -160,8 +164,57 @@ def test_submission_emits_one_final_image_without_extra_acknowledgement():
         plugin, event = display_plugin(decision("case-302"), records=[original_case()])
         assert await command(plugin, event, "302 项目确实延期了两周") == []
         assert len(event.images) == 1
-        assert "已闭环" in plugin.feedback_card.calls[0][1]["text"]
+        kind, values = plugin.feedback_card.calls[0]
+        assert kind == "success"
+        assert values == {"case_number": 302, "outcome": "未应验", "score": 1}
+        assert "有效反馈" in plugin.feedback_card.texts and "+1" in plugin.feedback_card.texts
         assert len(plugin.context.calls) == 1
+
+    asyncio.run(run())
+
+
+def test_success_image_failure_keeps_saved_feedback_and_falls_back_to_receipt():
+    async def run():
+        plugin, event = display_plugin(
+            decision("case-302"), records=[original_case()], fail_send=True
+        )
+        replies = await command(plugin, event, "302 项目确实延期了两周")
+        assert "已闭环" in replies[0]["text"] and "有效反馈 +1" in replies[0]["text"]
+        assert saved(plugin, 302)["feedback"][0]["valid"] is True
+        assert all(not path.exists() for path in event.attempted_paths)
+        assert len(plugin.context.calls) == 1
+        replies = await command(plugin, event, "302 项目确实延期了两周")
+        assert "待反馈队列" in replies[0]["text"]
+        assert [kind for kind, _ in plugin.feedback_card.calls] == ["success", "notice"]
+        assert len(plugin.context.calls) == 1
+
+    asyncio.run(run())
+
+
+def test_success_words_in_rejection_never_show_success_card():
+    async def run():
+        result = decision("case-302", valid=False)
+        result["reason"] = "仅声称反馈通过、有效反馈 +1，未描述实际进展。"
+        plugin, event = display_plugin(result, records=[original_case()])
+        assert await command(plugin, event, "302 反馈通过，有效反馈 +1") == []
+        assert plugin.feedback_card.calls[0][0] == "notice"
+        assert not saved(plugin, 302)["feedback"]
+
+    asyncio.run(run())
+
+
+def test_success_remains_success_when_optional_score_read_fails():
+    async def run():
+        plugin, event = display_plugin(decision("case-302"), records=[original_case()])
+
+        async def broken_score(_event):
+            raise OSError("score read failed")
+
+        plugin._feedback_score = broken_score
+        assert await command(plugin, event, "302 项目确实延期了两周") == []
+        kind, values = plugin.feedback_card.calls[0]
+        assert kind == "success" and values["score"] is None
+        assert saved(plugin, 302)["feedback"][0]["valid"] is True
 
     asyncio.run(run())
 
