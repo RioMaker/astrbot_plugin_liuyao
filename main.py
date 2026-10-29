@@ -72,7 +72,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.27.3"
+PLUGIN_VERSION = "0.27.4"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -99,7 +99,7 @@ HELP_TEXT = """六爻指令
 /六爻反馈 <编号> <内容>：反馈指定卦例；未通过可按原编号补充重试。
 /额度：查询今日余量、反馈积分和恢复时间。
 /ping：检测当前会话的六爻模型。
-/六爻：显示本帮助。"""
+/六爻：查看指令帮助图。"""
 
 
 def _reply_card_chain(sender_id: str, image_path: str) -> list[Any]:
@@ -504,7 +504,9 @@ class LiuyaoPlugin(
     async def collect_shefu_answer(self, event: AstrMessageEvent):
         """Capture explicit reveals and show help for configured bot mentions."""
         if self._should_reply_mention_help(event):
-            yield event.plain_result(self._help_text())
+            reply = await self._help_reply(event)
+            if reply:
+                yield event.plain_result(reply)
             return
         reply = await self._collect_shefu_answer(event)
         if reply:
@@ -861,6 +863,32 @@ class LiuyaoPlugin(
     def _help_text(self) -> str:
         return HELP_TEXT
 
+    async def _help_reply(self, event: AstrMessageEvent) -> str:
+        """Send one help card, retaining the full text if rendering or delivery fails."""
+        text = self._help_text()
+        image_path: Path | None = None
+        try:
+            renderer = getattr(self, "text_card", None)
+            if renderer is None:
+                renderer = LiuyaoTextCardRenderer(
+                    font_path=str(self._config_get("chart_font_path", "") or "")
+                )
+                self.text_card = renderer
+            image_path = Path(await asyncio.to_thread(renderer.render_help, text))
+            if not image_path.is_file() or image_path.stat().st_size <= 0:
+                raise ChartRenderError("未生成有效六爻帮助图片")
+            await event.send(event.image_result(str(image_path.absolute())))
+            return ""
+        except Exception as exc:
+            logger.warning("liuyao：帮助图片生成或发送失败：%r", exc)
+            return text
+        finally:
+            if image_path is not None:
+                try:
+                    image_path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("liuyao：清理帮助图片失败：%r", exc)
+
     async def _dispatch_liuyao(
         self,
         event: AstrMessageEvent,
@@ -869,7 +897,7 @@ class LiuyaoPlugin(
         """保留群开关与帮助；其他文本统一走 AI 预审起卦。"""
         text = (tail or "").strip()
         if not text:
-            return self._help_text()
+            return await self._help_reply(event)
 
         if text == "开":
             return await self._switch_reply(event, METHOD_LIUYAO, True)

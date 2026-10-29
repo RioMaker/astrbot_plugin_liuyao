@@ -136,7 +136,8 @@ def test_manual_command_still_runs_ai_review_and_interpretation_when_tools_disab
         plugin._render_and_send_chart.assert_awaited_once()
         plugin._send_reply_payload.assert_awaited_once()
         assert "断语" in plugin._send_reply_payload.call_args.args[3]
-        assert await plugin._dispatch_liuyao(event, "") == HELP_TEXT
+        assert await plugin._dispatch_liuyao(event, "") == ""
+        assert "image" in event.sent[-1]
         assert "卦例库已由配置关闭" in await plugin._feedback_reply(event, "")
         closed = _Event("member")
         closed.get_group_id = lambda: "closed"

@@ -100,6 +100,58 @@ class LiuyaoTextCardRenderer:
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
+    def render_help(self, text: str, *, output_path: str | Path | None = None) -> Path:
+        """Render the shared command help as readable command/description rows."""
+        lines = _clean_block(text).splitlines()
+        title, entries = lines[0], lines[1:]
+        measure = ImageDraw.Draw(Image.new("RGB", (CARD_WIDTH, 1), PAPER))
+        command_font, description_font = self._font(30), self._font(26)
+        rows = []
+        for entry in entries:
+            command, _, description = entry.partition("：")
+            command_lines = _wrap(measure, command, command_font, CONTENT_WIDTH - 56)
+            description_lines = (
+                _wrap(measure, description, description_font, CONTENT_WIDTH - 56)
+                if description
+                else []
+            )
+            row_height = 44 + len(command_lines) * 42 + len(description_lines) * 38
+            rows.append((command_lines, description_lines, row_height))
+
+        height = 196 + sum(row[2] + 14 for row in rows) + 98
+        canvas = Image.new("RGB", (CARD_WIDTH, height), PAPER)
+        draw_bamboo_background(canvas, CARD_WIDTH)
+        draw = ImageDraw.Draw(canvas)
+        _draw_frame(draw, height)
+        draw_taiji_logo(draw, MARGIN, 64, width=64, height=64)
+        # Help headings use the full CJK font; the editorial heading font is a subset.
+        _text(draw, MARGIN + 92, 64, title, self._font(46), JADE)
+        _text(draw, MARGIN + 94, 126, "起卦 · 回看 · 反馈", self._font(23), MUTED)
+        _text_right(draw, CONTENT_RIGHT, 76, "使用说明", self._font(23), MUTED)
+
+        y = 196
+        for command_lines, description_lines, row_height in rows:
+            _panel(draw, y, row_height, fill=JADE_PANEL)
+            text_y = y + 22
+            for line in command_lines:
+                _text(draw, MARGIN + 28, text_y, line, command_font, JADE)
+                text_y += 42
+            for line in description_lines:
+                _text(draw, MARGIN + 28, text_y, line, description_font, INK)
+                text_y += 38
+            y += row_height + 14
+
+        _rule(draw, y + 14)
+        _text(draw, MARGIN, y + 36, "六爻 · 可可子", self._font(19), MUTED)
+        _text_right(draw, CONTENT_RIGHT, y + 36, "查看帮助不消耗额度", self._font(19), MUTED)
+        path = temp_output_path(output_path)
+        try:
+            canvas.save(path, "PNG", optimize=True)
+        except Exception as exc:
+            path.unlink(missing_ok=True)
+            raise ChartRenderError(f"保存六爻帮助图失败：{exc}") from exc
+        return path
+
     def render(
         self,
         *,
