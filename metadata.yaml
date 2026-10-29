@@ -2,7 +2,7 @@ name: astrbot_plugin_liuyao
 display_name: 六爻起卦
 short_desc: AI 预审分类、随机六爻起卦、篇幅控制与解卦笺解读。
 desc: 面向 QQ 群的六爻插件，提供自由文本预审起卦、每日 AI 额度、卦图与解卦笺图片，以及 Agent 古籍查询和卦例工具。
-version: "0.26.0"
+version: "0.26.1"
 author: Rio
 repo: "https://github.com/RioMaker/astrbot_plugin_liuyao"
 astrbot_version: ">=4.24.0"

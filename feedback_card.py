@@ -50,6 +50,10 @@ except ImportError:  # pragma: no cover
 
 QUEUE_PAGE_SIZE = 8
 CONTENT_WIDTH = WIDTH - 2 * MARGIN
+QUEUE_NUMBER_WIDTH = 190
+QUEUE_TEXT_OFFSET = 226
+# 旅卦：上离下艮，按从上爻到初爻的绘图顺序排列。
+TRAVEL_HEXAGRAM_TOP_DOWN = (1, 0, 1, 1, 0, 0)
 
 
 def short_time(value: Any, *, now: datetime | None = None) -> str:
@@ -107,8 +111,14 @@ class LiuyaoFeedbackCardRenderer:
         canvas = Image.new("RGB", (WIDTH, height), PAPER)
         draw_bamboo_background(canvas, WIDTH)
         draw = ImageDraw.Draw(canvas)
-        draw.line((MARGIN, 48, MARGIN + 5, 98), fill=JADE, width=5)
-        self._text(draw, MARGIN + 24, 49, title, 46, JADE)
+        for index, yang in enumerate(TRAVEL_HEXAGRAM_TOP_DOWN):
+            top = 49 + index * 9
+            if yang:
+                draw.rectangle((MARGIN, top, MARGIN + 52, top + 4), fill=JADE)
+            else:
+                draw.rectangle((MARGIN, top, MARGIN + 20, top + 4), fill=JADE)
+                draw.rectangle((MARGIN + 32, top, MARGIN + 52, top + 4), fill=JADE)
+        self._text(draw, MARGIN + 78, 49, title, 46, JADE)
         if meta:
             draw.text((WIDTH - MARGIN, 64), meta, font=self._font(24), fill=MUTED, anchor="rt")
         return canvas, draw
@@ -142,7 +152,9 @@ class LiuyaoFeedbackCardRenderer:
         rows = []
         for case in cases:
             lines = self._lines(
-                case.get("question") or "未记录问题", width=CONTENT_WIDTH - 174, limit=2
+                case.get("question") or "未记录问题",
+                width=CONTENT_WIDTH - QUEUE_TEXT_OFFSET,
+                limit=2,
             )
             rows.append((case, lines, 60 + len(lines) * 44))
         height = 190 + sum(row[2] for row in rows) + 156 + len(rules) * 72 + 170
@@ -152,15 +164,30 @@ class LiuyaoFeedbackCardRenderer:
         self._text(draw, MARGIN, 119, "查看卦例与原断，再填写实际进展", 25, MUTED)
         y = 172
         for case, lines, row_height in rows:
-            draw.rounded_rectangle((MARGIN, y, MARGIN + 134, y + 44), radius=8, fill=JADE)
-            draw.text(
-                (MARGIN + 67, y + 22),
-                str(case["serial"]),
-                font=self._font(28),
-                fill=PAPER,
-                anchor="mm",
+            number_height = row_height - 28
+            draw.rounded_rectangle(
+                (MARGIN, y, MARGIN + QUEUE_NUMBER_WIDTH, y + number_height),
+                radius=10,
+                fill=JADE,
             )
-            x = MARGIN + 174
+            number = str(case["serial"])
+            size = 128
+            while size > 20:
+                font = self._font(size)
+                left, top, right, bottom = font.getbbox(number)
+                if right - left <= QUEUE_NUMBER_WIDTH - 24 and bottom - top <= number_height - 12:
+                    break
+                size -= 1
+            draw.text(
+                (
+                    MARGIN + (QUEUE_NUMBER_WIDTH - (right - left)) / 2 - left,
+                    y + (number_height - (bottom - top)) / 2 - top,
+                ),
+                number,
+                font=font,
+                fill=PAPER,
+            )
+            x = MARGIN + QUEUE_TEXT_OFFSET
             for index, line in enumerate(lines):
                 self._text(draw, x, y + index * 44, line, 31)
             cast = case.get("cast") or {}
@@ -172,7 +199,7 @@ class LiuyaoFeedbackCardRenderer:
                 draw,
                 x,
                 y + len(lines) * 44 + 4,
-                self._lines(meta, 23, CONTENT_WIDTH - 174, 1)[0],
+                self._lines(meta, 23, CONTENT_WIDTH - QUEUE_TEXT_OFFSET, 1)[0],
                 23,
                 MUTED,
             )
