@@ -15,7 +15,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 try:
     from .renderer import (
-        ACCENT,
         INK,
         JADE,
         MUTED,
@@ -24,12 +23,12 @@ try:
         TITLE_FONT_PATH,
         ChartRenderError,
         draw_bamboo_background,
+        draw_travel_logo,
         find_cjk_font,
         temp_output_path,
     )
 except ImportError:  # pragma: no cover - direct local execution
     from renderer import (
-        ACCENT,
         INK,
         JADE,
         MUTED,
@@ -38,6 +37,7 @@ except ImportError:  # pragma: no cover - direct local execution
         TITLE_FONT_PATH,
         ChartRenderError,
         draw_bamboo_background,
+        draw_travel_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -85,9 +85,7 @@ class LiuyaoTextCardRenderer:
             self._heading_path = custom
         else:
             self._body_path = find_cjk_font(bold=False)
-            self._heading_path = (
-                TITLE_FONT_PATH if TITLE_FONT_PATH.is_file() else self._body_path
-            )
+            self._heading_path = TITLE_FONT_PATH if TITLE_FONT_PATH.is_file() else self._body_path
         self._fonts: dict[tuple[int, bool], ImageFont.FreeTypeFont] = {}
 
     def _font(self, size: int, *, heading: bool = False) -> ImageFont.FreeTypeFont:
@@ -126,9 +124,7 @@ class LiuyaoTextCardRenderer:
             if question_text
             else []
         )
-        question_height = (
-            (22 + 30 + 8 + len(question_lines) * 46 + 22) if question_lines else 0
-        )
+        question_height = (22 + 30 + 8 + len(question_lines) * 46 + 22) if question_lines else 0
         paragraphs = [line for line in body_text.split("\n") if _clean(line)]
         body_rows: list[tuple[list[str], int]] = []
         for paragraph in paragraphs:
@@ -241,20 +237,7 @@ class LiuyaoTextCardRenderer:
         self, draw: ImageDraw.ImageDraw, *, headline: str, subtitle: str, meta: str
     ) -> None:
         top = _TOP_PAD
-        seal_size = 92
-        draw.rounded_rectangle(
-            (MARGIN, top, MARGIN + seal_size, top + seal_size), radius=8, fill=SEAL
-        )
-        seal_font = self._font(SIZES["seal"], heading=True)
-        for index, char in enumerate("解卦"):
-            _text_at(
-                draw,
-                MARGIN + seal_size // 2,
-                top + 26 + index * 44,
-                char,
-                seal_font,
-                "#FFFFFF",
-            )
+        draw_travel_logo(draw, MARGIN, top + 8, width=76, height=76)
 
         title_font = self._font(SIZES["title"], heading=True)
         _text(draw, MARGIN + 116, top + 2, headline, title_font, JADE)
@@ -300,9 +283,7 @@ def _clean(value: Any) -> str:
 def _clean_block(value: Any) -> str:
     """Collapse spaces inside each line but keep line breaks as paragraph marks."""
     text = str(value or "").replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
-    return "\n".join(
-        line for line in (" ".join(raw.split()) for raw in text.split("\n")) if line
-    )
+    return "\n".join(line for line in (" ".join(raw.split()) for raw in text.split("\n")) if line)
 
 
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list[str]:

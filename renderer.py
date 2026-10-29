@@ -30,6 +30,24 @@ ACCENT = "#B34F40"
 JADE = "#234A3B"
 PANEL = "#EAEEDF"
 RULE = "#D5DCCB"
+# 旅卦（第 56 卦）：上离下艮，按上爻到初爻绘制。
+TRAVEL_HEXAGRAM_TOP_DOWN = (1, 0, 1, 1, 0, 0)
+
+
+def draw_travel_logo(draw, x, y, *, width=52, height=50, color=JADE):
+    """Draw the shared six-line title mark used by every command image."""
+    stroke = max(2, round(height / 10))
+    step = (height - stroke) / 5
+    for index, yang in enumerate(TRAVEL_HEXAGRAM_TOP_DOWN):
+        top = y + round(index * step)
+        bottom = top + stroke - 1
+        if yang:
+            draw.rectangle((x, top, x + width - 1, bottom), fill=color)
+        else:
+            draw.rectangle((x, top, x + round(width * 0.4) - 1, bottom), fill=color)
+            draw.rectangle((x + round(width * 0.6), top, x + width - 1, bottom), fill=color)
+
+
 ELEMENT_COLORS = {
     "木": "#317450",
     "火": "#B54D3C",
@@ -349,7 +367,8 @@ class LiuyaoImageRenderer:
         return path
 
     def _draw_header(self, draw, primary, changed, cast, chart, cast_at, f):
-        self._text(draw, MARGIN, 45, "六爻排盘", f["title"], JADE)
+        draw_travel_logo(draw, MARGIN, 45, width=72, height=72)
+        self._text(draw, MARGIN + 100, 45, "六爻排盘", f["title"], JADE)
         stamp = cast_at.strftime("%Y-%m-%d %H:%M:%S") if cast_at else "原起卦时间未知"
         zone = "北京时间 UTC+8" if cast_at and cast_at.tzinfo else "原时间未注明时区"
         for y, text in ((54, stamp), (92, zone)):

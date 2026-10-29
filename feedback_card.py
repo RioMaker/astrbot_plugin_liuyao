@@ -23,6 +23,7 @@ try:
         WIDTH,
         LiuyaoImageRenderer,
         draw_bamboo_background,
+        draw_travel_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -42,6 +43,7 @@ except ImportError:  # pragma: no cover
         WIDTH,
         LiuyaoImageRenderer,
         draw_bamboo_background,
+        draw_travel_logo,
         find_cjk_font,
         temp_output_path,
     )
@@ -53,8 +55,6 @@ CONTENT_WIDTH = WIDTH - 2 * MARGIN
 QUEUE_NUMBER_WIDTH = 134
 QUEUE_NUMBER_SIZE = 36
 QUEUE_TEXT_OFFSET = 174
-# 旅卦：上离下艮，按从上爻到初爻的绘图顺序排列。
-TRAVEL_HEXAGRAM_TOP_DOWN = (1, 0, 1, 1, 0, 0)
 
 
 def short_time(value: Any, *, now: datetime | None = None) -> str:
@@ -112,13 +112,7 @@ class LiuyaoFeedbackCardRenderer:
         canvas = Image.new("RGB", (WIDTH, height), PAPER)
         draw_bamboo_background(canvas, WIDTH)
         draw = ImageDraw.Draw(canvas)
-        for index, yang in enumerate(TRAVEL_HEXAGRAM_TOP_DOWN):
-            top = 49 + index * 9
-            if yang:
-                draw.rectangle((MARGIN, top, MARGIN + 52, top + 4), fill=JADE)
-            else:
-                draw.rectangle((MARGIN, top, MARGIN + 20, top + 4), fill=JADE)
-                draw.rectangle((MARGIN + 32, top, MARGIN + 52, top + 4), fill=JADE)
+        draw_travel_logo(draw, MARGIN, 49)
         self._text(draw, MARGIN + 78, 49, title, 46, JADE)
         if meta:
             draw.text((WIDTH - MARGIN, 64), meta, font=self._font(24), fill=MUTED, anchor="rt")
