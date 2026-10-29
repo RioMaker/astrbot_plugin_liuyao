@@ -123,7 +123,7 @@ class FeedbackReviewMixin:
                 case = next((c for c in cases if c["serial"] == int(text)), None)
                 if case is None:
                     return await self._feedback_notice(
-                        event, "未找到你在当前群的该编号卦例。\n/反馈 查看队列"
+                        event, "未找到你在当前群的该编号卦例。\n/六爻反馈 查看队列"
                     )
                 conclusion = self._plain_text(saved_conclusion(case))
                 status = (
@@ -147,7 +147,7 @@ class FeedbackReviewMixin:
                 return fallback + "\n卦图暂不可用，请稍后重试。"
             listing = re.fullmatch(r"列表(?:\s+(\d{1,6}))?", text)
             if text.startswith("列表") and listing is None:
-                return await self._feedback_notice(event, "翻页格式：/反馈 列表 2")
+                return await self._feedback_notice(event, "翻页格式：/六爻反馈 列表 2")
             pending = await self._pending_feedback_cases(event)
             # Unnumbered text cannot select among multiple cases: show the queue.
             if not text or listing or (len(pending) != 1 and not re.match(r"^\d+\s+", text)):
@@ -155,7 +155,7 @@ class FeedbackReviewMixin:
                 pages = max(1, (len(pending) + QUEUE_PAGE_SIZE - 1) // QUEUE_PAGE_SIZE)
                 if not 1 <= page <= pages:
                     return await self._feedback_notice(
-                        event, f"页码超出范围，共 {pages} 页。\n/反馈 返回队列"
+                        event, f"页码超出范围，共 {pages} 页。\n/六爻反馈 返回队列"
                     )
                 visible = pending[(page - 1) * QUEUE_PAGE_SIZE : page * QUEUE_PAGE_SIZE]
                 rules = self._ai_quota_feedback_rules()
@@ -177,14 +177,15 @@ class FeedbackReviewMixin:
                     return ""
                 fallback = await self._feedback_queue(event, visible)
                 return (
-                    f"{fallback}\n第 {page}/{pages} 页，共 {len(pending)} 例；翻页 /反馈 列表 页码"
+                    f"{fallback}\n第 {page}/{pages} 页，共 {len(pending)} 例；"
+                    "翻页 /六爻反馈 列表 页码"
                 )
             reply = await self._feedback_reply(event, text)
             # Only the exact receipt emitted after persistence selects the success card.
             # Reviewer prose and user input must never be interpreted as success markers.
             accepted = re.fullmatch(
                 r"卦例 (\d{1,12}) · (应验|部分应验|未应验|进行中|未分类)\n"
-                r"反馈通过 · 已闭环 · 有效反馈 \+1\n/反馈 查看队列与奖励进度",
+                r"反馈通过 · 已闭环 · 有效反馈 \+1\n/六爻反馈 查看队列与奖励进度",
                 reply,
             )
             if accepted:
@@ -266,7 +267,7 @@ class FeedbackReviewMixin:
         example = pending[0]["serial"] if pending else 1
         rows.extend(
             [
-                f"查看 /反馈 {example}；提交 /反馈 {example} 实际进展或结果。",
+                f"查看 /六爻反馈 {example}；提交 /六爻反馈 {example} 实际进展或结果。",
                 "未应验也算有效。",
                 "只有审核通过才记录反馈、计入奖励并闭环，每例只能通过一次。",
                 "无关话语、纯感想等会提示原因与补充方式，原编号保留，可继续提交。",
@@ -291,10 +292,10 @@ class FeedbackReviewMixin:
                 number = int(match[1])
                 case = next((c for c in pending if c["serial"] == number), None)
                 if case is None:
-                    return "该编号不在你当前群的待反馈队列中，请发送 /反馈 查看。"
+                    return "该编号不在你当前群的待反馈队列中，请发送 /六爻反馈 查看。"
                 feedback = (match[2] or "").strip()
                 if not feedback:
-                    return f"请补充实际进展，例如：/反馈 {number} 项目最终延期了两周。"
+                    return f"请补充实际进展，例如：/六爻反馈 {number} 项目最终延期了两周。"
             elif len(pending) == 1:
                 case, feedback = pending[0], text
             else:
@@ -323,7 +324,7 @@ class FeedbackReviewMixin:
             candidates = await self._pending_feedback_cases(event)
             case = next((c for c in candidates if c["id"] == case["id"]), None)
             if case is None:
-                return "该卦例已反馈或不在当前待反馈队列，请发送 /反馈 查看。"
+                return "该卦例已反馈或不在当前待反馈队列，请发送 /六爻反馈 查看。"
             try:
                 decision = await self._review_case_feedback(event, case, feedback, answer=answer)
             except Exception as exc:
@@ -335,7 +336,7 @@ class FeedbackReviewMixin:
                 return (
                     f"卦例 {case['serial']} · 反馈未通过\n"
                     f"问题：{reason}\n请补充：{guidance}\n"
-                    f"重新提交：/反馈 {case['serial']} 补充后的实际进展或结果\n"
+                    f"重新提交：/六爻反馈 {case['serial']} 补充后的实际进展或结果\n"
                 )
             reply = await self._append_case_feedback(
                 event,

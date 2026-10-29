@@ -173,7 +173,7 @@ class LiuyaoFeedbackCardRenderer:
         self._text(draw, MARGIN, 609, "一卦有始有终，多谢回来报信。", 29, JADE)
         draw.text(
             (WIDTH - MARGIN, 613),
-            "/反馈 查看队列与奖励",
+            "/六爻反馈 查看队列与奖励",
             font=self._font(25),
             fill=MUTED,
             anchor="rt",
@@ -293,21 +293,21 @@ class LiuyaoFeedbackCardRenderer:
             self._text(draw, MARGIN + 26, rule_y - 3, "暂无加额规则", 24, MUTED)
         y += panel_height + 32
         example_number = str(rows[0][0]["serial"]) if rows else "编号"
-        self._text(draw, MARGIN, y, f"看原卦：/反馈 {example_number}", 28, JADE)
+        self._text(draw, MARGIN, y, f"看原卦：/六爻反馈 {example_number}", 28, JADE)
         self._text(
             draw,
             MARGIN,
             y + 48,
-            f"交反馈：/反馈 {example_number} 实际发生了……，与原断相比……",
+            f"交反馈：/六爻反馈 {example_number} 实际发生了……，与原断相比……",
             28,
             JADE,
         )
         if pages > 1:
             navigation = []
             if page > 1:
-                navigation.append(f"上一页 /反馈 列表 {page - 1}")
+                navigation.append(f"上一页 /六爻反馈 列表 {page - 1}")
             if page < pages:
-                navigation.append(f"下一页 /反馈 列表 {page + 1}")
+                navigation.append(f"下一页 /六爻反馈 列表 {page + 1}")
             self._text(draw, MARGIN, y + 94, "    ".join(navigation), 25, MUTED)
         return self._save(canvas, output_path)
 
@@ -364,9 +364,9 @@ class LiuyaoFeedbackCardRenderer:
             self._text(draw, MARGIN + 28, y + 72 + index * 52, line, 34, JADE)
         y += conclusion_height + 32
         instruction = (
-            f"/反馈 {case['serial']} 实际进展或结果"
+            f"/六爻反馈 {case['serial']} 实际进展或结果"
             if status == "待反馈"
-            else "/反馈 返回待反馈队列"
+            else "/六爻反馈 返回待反馈队列"
         )
         self._text(draw, MARGIN, y, instruction, 27, MUTED)
         return self._save(canvas, output_path)

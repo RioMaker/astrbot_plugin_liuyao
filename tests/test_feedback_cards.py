@@ -79,9 +79,9 @@ def test_queue_is_one_compact_image_with_reward_progress_and_cleanup():
         kind, values = plugin.feedback_card.calls[0]
         assert kind == "queue" and [c["serial"] for c in values["cases"]] == [302, 905]
         assert values["rules"][0]["count"] == 0
-        assert "看原卦：/反馈 302" in plugin.feedback_card.texts
+        assert "看原卦：/六爻反馈 302" in plugin.feedback_card.texts
         assert "原断：将如期完成" in plugin.feedback_card.texts
-        assert any(text.startswith("交反馈：/反馈 302 ") for text in plugin.feedback_card.texts)
+        assert any(text.startswith("交反馈：/六爻反馈 302 ") for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         assert "JSON" not in " ".join(plugin.feedback_card.texts)
 
@@ -116,9 +116,9 @@ def test_queue_pagination_does_not_confuse_page_number_with_case_number():
         kind, values = plugin.feedback_card.calls[0]
         assert kind == "queue" and values["page"] == 2 and values["total"] == 10
         assert [c["serial"] for c in values["cases"]] == [9, 10]
-        assert "看原卦：/反馈 9" in plugin.feedback_card.texts
-        assert any(text.startswith("交反馈：/反馈 9 ") for text in plugin.feedback_card.texts)
-        assert not any("/反馈 302" in text for text in plugin.feedback_card.texts)
+        assert "看原卦：/六爻反馈 9" in plugin.feedback_card.texts
+        assert any(text.startswith("交反馈：/六爻反馈 9 ") for text in plugin.feedback_card.texts)
+        assert not any("/六爻反馈 302" in text for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         await command(plugin, event, "列表 99")
         assert "超出范围" in plugin.feedback_card.calls[-1][1]["text"]
@@ -251,7 +251,7 @@ def test_rejected_feedback_image_explains_problem_and_keeps_original_number():
         plugin, event = display_plugin(decision("case-302", valid=False), records=[original_case()])
         assert await command(plugin, event, "302 挺准的") == []
         text = plugin.feedback_card.calls[0][1]["text"]
-        assert "问题：" in text and "请补充：" in text and "/反馈 302" in text
+        assert "问题：" in text and "请补充：" in text and "/六爻反馈 302" in text
         assert not saved(plugin, 302)["feedback"]
 
     asyncio.run(run())
@@ -357,8 +357,8 @@ def test_long_questions_and_empty_queue_have_bounded_readable_layout(tmp_path):
         assert 1000 < image.height < 2000
     with Image.open(empty) as image:
         assert 400 < image.height < 800
-    assert "看原卦：/反馈 编号" in renderer.texts
-    assert any(text.startswith("交反馈：/反馈 编号 ") for text in renderer.texts)
+    assert "看原卦：/六爻反馈 编号" in renderer.texts
+    assert any(text.startswith("交反馈：/六爻反馈 编号 ") for text in renderer.texts)
 
 
 @pytest.mark.parametrize(("count", "status"), [(1, "还差 2 次"), (3, "已达标"), (5, "已达标")])

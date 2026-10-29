@@ -72,7 +72,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.27.2"
+PLUGIN_VERSION = "0.27.3"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -94,9 +94,9 @@ HELP_TEXT = """六爻指令
 /六爻 <内容>：预审并起卦，符合条件时解卦；无额度时只返回卦图。
 /六爻 开、/六爻 关：管理员开启或关闭本群起卦。
 /起卦 六爻 <内容>：起卦入口，同 /六爻。
-/反馈：图片查看待反馈队列及奖励进度；/反馈 列表 2 翻页。
-/反馈 <编号>：查看原卦图与结论汇总图。
-/反馈 <编号> <内容>：反馈指定卦例；未通过可按原编号补充重试。
+/六爻反馈：图片查看待反馈队列及奖励进度；/六爻反馈 列表 2 翻页。
+/六爻反馈 <编号>：查看原卦图与结论汇总图。
+/六爻反馈 <编号> <内容>：反馈指定卦例；未通过可按原编号补充重试。
 /额度：查询今日余量、反馈积分和恢复时间。
 /ping：检测当前会话的六爻模型。
 /六爻：显示本帮助。"""
@@ -188,7 +188,7 @@ class LiuyaoPlugin(
         if reply:
             yield event.plain_result(reply)
 
-    @filter.command("反馈")
+    @filter.command("六爻反馈")
     async def liuyao_feedback_command(
         self,
         event: AstrMessageEvent,
@@ -1501,7 +1501,7 @@ class LiuyaoPlugin(
         roots = (
             r"/(?:六爻|liunyao)(?=\s|$)",
             r"/(?:起卦|divination)\s+(?:六爻|liunyao)(?=\s|$)",
-            r"/反馈(?=\s|$)",
+            r"/六爻反馈(?=\s|$)",
             r"/额度(?=\s|$)",
             r"/ping(?=\s|$)",
         )

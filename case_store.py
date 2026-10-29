@@ -247,7 +247,7 @@ class LiuyaoCaseStoreMixin:
         if reviewed_valid is False:
             return (
                 f"反馈未通过：{review_reason or '请补充与原问题相关的真实进展或结果'}。"
-                "尚未记录反馈，请用 /反馈 查看原编号并补充重试。"
+                "尚未记录反馈，请用 /六爻反馈 查看原编号并补充重试。"
             )
         group_id = str(event.get_group_id() or "").strip()
         caster_id = str(event.get_sender_id() or "").strip()
@@ -337,7 +337,7 @@ class LiuyaoCaseStoreMixin:
                 score_note = "AI 审核有效，已记入积分。" if reviewed_valid else ""
                 return f"已记录射覆卦例 {case['serial']:03d}，用户揭晓答案：{answer}。{score_note}"
             if reviewed_valid is True:
-                score_note = "反馈通过 · 已闭环 · 有效反馈 +1\n/反馈 查看队列与奖励进度"
+                score_note = "反馈通过 · 已闭环 · 有效反馈 +1\n/六爻反馈 查看队列与奖励进度"
             elif reviewed_valid is False:
                 score_note = f"AI 审核未判为有效：{review_reason or '未提供可核验的实际进展'}。"
             else:

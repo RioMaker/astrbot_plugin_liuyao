@@ -163,7 +163,7 @@ def test_retry_then_accept_inherits_prefix_and_only_then_closes_and_rewards():
         plugin, event = setup(decision(valid=False), decision())
         first = await plugin._feedback_reply(event, "1 挺准的")
         assert "未通过" in first and "问题：" in first and "请补充：" in first
-        assert "重新提交：/反馈 1" in first
+        assert "重新提交：/六爻反馈 1" in first
         assert saved(plugin)["feedback"] == [] and saved(plugin)["status"] == "analyzed"
         assert await plugin._feedback_score(event) == 0
         assert await plugin._valid_feedback_counts(event, {3}) == {3: 0}
