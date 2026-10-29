@@ -101,49 +101,131 @@ class LiuyaoTextCardRenderer:
     # Layout
     # ------------------------------------------------------------------
     def render_help(self, text: str, *, output_path: str | Path | None = None) -> Path:
-        """Render the shared command help as readable command/description rows."""
+        """Group the shared command text by task, with a prominent starting point."""
         lines = _clean_block(text).splitlines()
-        title, entries = lines[0], lines[1:]
+        entries = [tuple(line.split("：", 1)) for line in lines[1:]]
+        cast = next(row for row in entries if row[0].startswith("/六爻 <"))
+        alias = next(row for row in entries if row[0].startswith("/起卦 "))
+        feedback = [
+            row for row in entries if row[0].startswith("/六爻反馈") and "列表" not in row[0]
+        ]
+        paging = next(row for row in entries if row[0].startswith("/六爻反馈 列表"))
+        admin = next(row for row in entries if row[0].startswith("/六爻 开"))
+        help_row = next(row for row in entries if row[0] == "/六爻")
+        utilities = [row for row in entries if row[0] in {"/额度", "/ping"}]
         measure = ImageDraw.Draw(Image.new("RGB", (CARD_WIDTH, 1), PAPER))
-        command_font, description_font = self._font(30), self._font(26)
-        rows = []
-        for entry in entries:
-            command, _, description = entry.partition("：")
-            command_lines = _wrap(measure, command, command_font, CONTENT_WIDTH - 56)
-            description_lines = (
-                _wrap(measure, description, description_font, CONTENT_WIDTH - 56)
-                if description
-                else []
-            )
-            row_height = 44 + len(command_lines) * 42 + len(description_lines) * 38
-            rows.append((command_lines, description_lines, row_height))
 
-        height = 196 + sum(row[2] + 14 for row in rows) + 98
+        def wrap(value, size, width):
+            return _wrap(measure, value, self._font(size), width)
+
+        cast_description = wrap(cast[1], 25, CONTENT_WIDTH - 64)
+        hero_height = 228 + len(cast_description) * 38
+        alias_lines = wrap(f"{alias[1]} {alias[0]}", 22, CONTENT_WIDTH)
+        feedback_y = 190 + hero_height + 28 + len(alias_lines) * 34 + 42
+        feedback_left = MARGIN + 210
+        feedback_width = CONTENT_RIGHT - feedback_left - 28
+        feedback_rows = []
+        for label, (command, description) in zip(
+            ("查编号", "看原断", "交反馈"), feedback, strict=True
+        ):
+            commands = wrap(command, 29, feedback_width)
+            descriptions = wrap(description, 24, feedback_width)
+            height = 40 + len(commands) * 42 + len(descriptions) * 35
+            feedback_rows.append((label, commands, descriptions, height))
+        paging_lines = wrap(f"翻页  {paging[0]} · {paging[1]}", 22, CONTENT_WIDTH - 56)
+        feedback_height = sum(row[3] for row in feedback_rows) + 128 + len(paging_lines) * 34
+        utilities_y = feedback_y + 62 + feedback_height + 46
+        utility_width = (CONTENT_WIDTH - 20) // 2
+        utility_rows = [
+            (command, wrap(description, 24, utility_width - 48))
+            for command, description in utilities
+        ]
+        utility_height = 78 + max(len(row[1]) for row in utility_rows) * 35
+        admin_lines = wrap(f"{admin[0]}  ·  {admin[1]}", 23, CONTENT_WIDTH - 160)
+        admin_height = 36 + len(admin_lines) * 35
+        footer_y = utilities_y + 62 + utility_height + 18 + admin_height + 36
+        height = footer_y + 106
         canvas = Image.new("RGB", (CARD_WIDTH, height), PAPER)
         draw_bamboo_background(canvas, CARD_WIDTH)
         draw = ImageDraw.Draw(canvas)
         _draw_frame(draw, height)
-        draw_taiji_logo(draw, MARGIN, 64, width=64, height=64)
-        # Help headings use the full CJK font; the editorial heading font is a subset.
-        _text(draw, MARGIN + 92, 64, title, self._font(46), JADE)
-        _text(draw, MARGIN + 94, 126, "起卦 · 回看 · 反馈", self._font(23), MUTED)
-        _text_right(draw, CONTENT_RIGHT, 76, "使用说明", self._font(23), MUTED)
 
-        y = 196
-        for command_lines, description_lines, row_height in rows:
-            _panel(draw, y, row_height, fill=JADE_PANEL)
-            text_y = y + 22
-            for line in command_lines:
-                _text(draw, MARGIN + 28, text_y, line, command_font, JADE)
-                text_y += 42
-            for line in description_lines:
-                _text(draw, MARGIN + 28, text_y, line, description_font, INK)
-                text_y += 38
-            y += row_height + 14
+        def write(x, y, value, size=25, color=INK):
+            _text(draw, x, y, value, self._font(size), color)
 
-        _rule(draw, y + 14)
-        _text(draw, MARGIN, y + 36, "六爻 · 可可子", self._font(19), MUTED)
-        _text_right(draw, CONTENT_RIGHT, y + 36, "查看帮助不消耗额度", self._font(19), MUTED)
+        def write_lines(x, y, rows, size, leading, color=INK):
+            for row in rows:
+                write(x, y, row, size, color)
+                y += leading
+            return y
+
+        def section(y, number, label, hint):
+            write(MARGIN, y + 3, number, 25, SEAL)
+            write(MARGIN + 53, y, label, 32, JADE)
+            _text_right(draw, CONTENT_RIGHT, y + 8, hint, self._font(21), MUTED)
+
+        draw_taiji_logo(draw, MARGIN, 63, width=64, height=64)
+        write(MARGIN + 90, 63, lines[0], 46, JADE)
+        write(MARGIN + 92, 126, "先起卦，再回看，有结果后回来反馈", 23, MUTED)
+
+        # The primary action is deliberately stronger than the reference commands.
+        _panel(draw, 190, hero_height, fill=JADE)
+        write(MARGIN + 30, 216, "01  开始起卦", 26, "#DADDBA")
+        _text_right(draw, CONTENT_RIGHT - 30, 220, "常用入口", self._font(21), "#DADDBA")
+        write(MARGIN + 30, 263, cast[0], 40, PAPER)
+        bottom = write_lines(MARGIN + 32, 324, cast_description, 25, 38, PAPER)
+        draw.rounded_rectangle(
+            (MARGIN + 24, bottom + 12, CONTENT_RIGHT - 24, bottom + 68),
+            radius=9,
+            fill="#365A4C",
+        )
+        write(MARGIN + 40, bottom + 27, "示例", 22, "#DADDBA")
+        write(MARGIN + 116, bottom + 24, "/六爻 这个项目能按期完成吗", 28, PAPER)
+        write_lines(MARGIN + 4, 190 + hero_height + 24, alias_lines, 22, 34, MUTED)
+
+        section(feedback_y, "02", "回看与反馈", "先查编号，再提交结果")
+        top = feedback_y + 62
+        _panel(draw, top, feedback_height, fill=JADE_PANEL)
+        y = top
+        for index, (label, commands, descriptions, row_height) in enumerate(feedback_rows, 1):
+            cx, cy = MARGIN + 40, y + 37
+            if index < len(feedback_rows):
+                draw.line((cx, cy + 17, cx, cy + row_height - 17), fill=RULE, width=2)
+            draw.ellipse((cx - 17, cy - 17, cx + 17, cy + 17), fill=JADE)
+            _text_at(draw, cx, cy, str(index), self._font(21), PAPER)
+            write(MARGIN + 72, y + 23, label, 27, JADE)
+            bottom = write_lines(feedback_left, y + 22, commands, 29, 42, JADE)
+            write_lines(feedback_left, bottom + 2, descriptions, 24, 35)
+            y += row_height
+        draw.line((MARGIN + 28, y, CONTENT_RIGHT - 28, y), fill=RULE, width=1)
+        y = write_lines(MARGIN + 28, y + 20, paging_lines, 22, 34, MUTED)
+        write(MARGIN + 28, y + 16, "示例  /六爻反馈 302 项目已按期完成", 26, JADE)
+        write(MARGIN + 28, y + 57, "302 为示例编号，请替换为你列表中的实际编号。", 22, MUTED)
+
+        section(utilities_y, "03", "查询与管理", "按需使用")
+        for index, (command, descriptions) in enumerate(utility_rows):
+            left = MARGIN + index * (utility_width + 20)
+            top = utilities_y + 62
+            draw.rounded_rectangle(
+                (left, top, left + utility_width, top + utility_height),
+                radius=12,
+                fill=PAPER_DEEP,
+            )
+            write(left + 24, top + 22, command, 32, JADE)
+            label = "查额度" if command == "/额度" else "测模型"
+            _text_right(draw, left + utility_width - 24, top + 30, label, self._font(22), MUTED)
+            write_lines(left + 24, top + 73, descriptions, 24, 35)
+        top = utilities_y + 62 + utility_height + 18
+        _panel(draw, top, admin_height, fill=PAPER_DEEP)
+        draw.rounded_rectangle(
+            (MARGIN + 18, top + 18, MARGIN + 119, top + 53), radius=6, fill="#E8D9C7"
+        )
+        write(MARGIN + 34, top + 24, "管理员", 22, "#805A38")
+        write_lines(MARGIN + 142, top + 18, admin_lines, 23, 35)
+
+        _rule(draw, footer_y)
+        write(MARGIN, footer_y + 22, f"{help_row[0]}  ·  {help_row[1]}", 21, MUTED)
+        _text_right(draw, CONTENT_RIGHT, footer_y + 22, "查看帮助不消耗额度", self._font(21), MUTED)
         path = temp_output_path(output_path)
         try:
             canvas.save(path, "PNG", optimize=True)

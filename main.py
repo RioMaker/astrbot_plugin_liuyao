@@ -72,7 +72,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.27.4"
+PLUGIN_VERSION = "0.27.5"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -90,14 +90,15 @@ AGENT_ACTION_TOOL_NAMES = frozenset(
     }
 )
 
-HELP_TEXT = """六爻指令
-/六爻 <内容>：预审并起卦，符合条件时解卦；无额度时只返回卦图。
+HELP_TEXT = """六爻使用指南
+/六爻 <内容>：写清想问的事，预审后起卦并解读；无额度时只返回卦图。
 /六爻 开、/六爻 关：管理员开启或关闭本群起卦。
-/起卦 六爻 <内容>：起卦入口，同 /六爻。
-/六爻反馈：图片查看待反馈队列及奖励进度；/六爻反馈 列表 2 翻页。
-/六爻反馈 <编号>：查看原卦图与结论汇总图。
-/六爻反馈 <编号> <内容>：反馈指定卦例；未通过可按原编号补充重试。
-/额度：查询今日余量、反馈积分和恢复时间。
+/起卦 六爻 <内容>：同样可用。
+/六爻反馈：查看待反馈编号与奖励进度。
+/六爻反馈 <编号>：回看原卦图与结论。
+/六爻反馈 <编号> <实际结果>：填写真实进展或结果；未通过可按原编号补充。
+/六爻反馈 列表 2：查看第 2 页，数字可替换。
+/额度：今日余量、反馈积分与恢复时间。
 /ping：检测当前会话的六爻模型。
 /六爻：查看指令帮助图。"""
 
