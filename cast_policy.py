@@ -59,6 +59,9 @@ class CastPolicyMixin:
         enforce_question=True,
         enforce_duplicate=True,
     ):
+        gate = getattr(self, "_user_access_error", None)
+        if callable(gate) and (error := await gate(event)):
+            return None, error
         if enforce_question:
             error = question_error(question)
             if error:
@@ -125,6 +128,9 @@ class CastPolicyMixin:
                         # under this lock, before another cast can interleave.
                         await self.put_kv_data(key, state)
                         raise
+                record_user = getattr(self, "_record_cast_user", None)
+                if callable(record_user):
+                    await record_user(event, cast.cast_at)
             except Exception:
                 logger.exception("liuyao：起卦准入记录处理失败")
                 return None, "起卦记录读取或保存失败，本次未返回新卦，请稍后重试。"

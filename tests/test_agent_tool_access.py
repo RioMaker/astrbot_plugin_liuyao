@@ -25,23 +25,27 @@ ACTION_CALLS = [
 
 
 @pytest.mark.parametrize(("method", "kwargs"), ACTION_CALLS)
-def test_disabled_tools_return_help_without_reading_or_mutating_data(method, kwargs):
+def test_disabled_tools_check_ban_without_reading_cases_or_mutating_data(method, kwargs):
     async def run():
         plugin = _make_enabled_plugin()
         plugin.config["agent_tools_enabled"] = False
         before = copy.deepcopy(plugin._test_store)
-        plugin.get_kv_data = AsyncMock(side_effect=AssertionError("must not read data"))
+
+        async def permission_data(key, default=None):
+            assert key == "liuyao_users_v1"
+            return default
+
+        plugin.get_kv_data = AsyncMock(side_effect=permission_data)
         plugin.put_kv_data = AsyncMock(side_effect=AssertionError("must not write data"))
         plugin.context = SimpleNamespace(
             llm_generate=AsyncMock(side_effect=AssertionError("must not call a model"))
         )
-        # An opaque event also proves the gate runs before platform/group access.
-        result = await getattr(plugin, method)(object(), **kwargs)
+        result = await getattr(plugin, method)(_Event("member"), **kwargs)
         assert "已关闭 AI 直接使用" in result
         assert "请指导用户亲自发送" in result
         assert HELP_TEXT in result
         assert plugin._test_store == before
-        plugin.get_kv_data.assert_not_awaited()
+        plugin.get_kv_data.assert_awaited_once()
         plugin.put_kv_data.assert_not_awaited()
         plugin.context.llm_generate.assert_not_awaited()
 
@@ -53,7 +57,9 @@ def test_help_is_available_without_a_group_or_quota(enabled):
     plugin = _make_enabled_plugin()
     plugin.config.update(agent_tools_enabled=enabled, ai_daily_limit=1)
     before = copy.deepcopy(plugin._test_store)
-    result = asyncio.run(plugin.get_liuyao_help_tool(object()))
+    event = _Event("member")
+    event.get_group_id = lambda: ""
+    result = asyncio.run(plugin.get_liuyao_help_tool(event))
     assert HELP_TEXT in result
     assert ("当前允许" if enabled else "当前已关闭") in result
     assert plugin._test_store == before

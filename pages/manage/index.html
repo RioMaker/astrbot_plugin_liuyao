@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>六爻 · 用户与卦例管理</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <header><div><div class="eyebrow">六爻起卦 / 管理中心</div><h1>用户与卦例</h1><p>查看起卦记录，管理使用权限与赠送额度。</p></div><button id="refresh" class="secondary">刷新数据</button></header>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <section class="metrics" aria-label="概览">
+      <div><span>已记录用户</span><strong id="stat-users">—</strong></div>
+      <div><span>累计起卦记录</span><strong id="stat-casts">—</strong></div>
+      <div><span>已保存卦例</span><strong id="stat-cases">—</strong></div>
+      <div><span>已封禁用户</span><strong id="stat-banned">—</strong></div>
+    </section>
+    <section class="panel">
+      <nav aria-label="管理分类"><button id="tab-users" class="tab active" aria-pressed="true">用户管理</button><button id="tab-cases" class="tab" aria-pressed="false">卦例管理</button></nav>
+      <form id="search-form" class="toolbar">
+        <label class="search"><span class="sr-only">搜索用户或卦例</span><input id="search" type="search" maxlength="200" placeholder="搜索 QQ 号、昵称或群号"></label>
+        <label><span class="sr-only">筛选状态</span><select id="state"><option value="all">全部用户</option><option value="active">正常使用</option><option value="banned">已封禁</option></select></label>
+        <button type="submit">搜索</button>
+      </form>
+      <p id="table-hint" class="hint">每日额度优先使用；赠送额度跨日保留，用尽后自动隐藏 +n。</p>
+      <div class="table-wrap"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
+      <div id="empty" class="empty" hidden>暂无记录</div>
+      <footer><span id="count">正在连接 AstrBot…</span><div class="pager"><button id="prev" class="secondary" disabled>上一页</button><span id="page">1 / 1</span><button id="next" class="secondary" disabled>下一页</button></div></footer>
+    </section>
+    <p class="footnote">历史用户从仍保留的卦例补录；此后每次成功起卦都会记录用户，包括没有 AI 解读的起卦。时间均为北京时间。</p>
+  </main>
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="dialog-head"><div><span class="eyebrow" id="detail-kicker"></span><h2 id="detail-title"></h2></div><button id="close-detail" class="secondary" aria-label="关闭详情">关闭</button></div>
+    <div id="detail-notice" role="status" aria-live="polite" hidden></div>
+    <div id="detail-body"></div>
+  </dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -17,6 +17,7 @@ from astrbot.core.star.filter.command import GreedyStr
 
 if __package__:
     from . import prompts
+    from .admin_page import AdminPageMixin
     from .ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
     from .case_library import format_case_references, search_cases
     from .case_store import LiuyaoCaseStoreMixin
@@ -41,8 +42,10 @@ if __package__:
     )
     from .shefu import ShefuMixin
     from .textcard import LiuyaoTextCardRenderer
+    from .user_management import UserManagementMixin
 else:  # pragma: no cover - direct local execution
     import prompts
+    from admin_page import AdminPageMixin
     from ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
     from case_library import format_case_references, search_cases
     from case_store import LiuyaoCaseStoreMixin
@@ -67,12 +70,13 @@ else:  # pragma: no cover - direct local execution
     )
     from shefu import ShefuMixin
     from textcard import LiuyaoTextCardRenderer
+    from user_management import UserManagementMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.27.5"
+PLUGIN_VERSION = "0.28.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -118,6 +122,8 @@ def _reply_card_chain(sender_id: str, image_path: str) -> list[Any]:
     PLUGIN_REPO,
 )
 class LiuyaoPlugin(
+    AdminPageMixin,
+    UserManagementMixin,
     DailyAIQuotaMixin,
     FeedbackReviewMixin,
     CastPolicyMixin,
@@ -157,7 +163,11 @@ class LiuyaoPlugin(
         self._case_lock = asyncio.Lock()
         self._cast_lock = asyncio.Lock()
         self._pending_agent_cases: dict[str, list[str]] = {}
+        self._register_admin_page()
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
+
+    async def initialize(self):
+        await self._ensure_user_registry()
 
     # ------------------------------------------------------------------
     # 两条等价根指令：自由文本与保留子命令都由插件统一分派。
@@ -180,6 +190,9 @@ class LiuyaoPlugin(
         content: GreedyStr,
     ):
         """术数总入口；当前支持 /起卦 六爻 ...。"""
+        if error := await self._user_access_error(event):
+            yield event.plain_result(error)
+            return
         parts = str(content or "").strip().split(maxsplit=1)
         if not parts or parts[0].lower() not in {"六爻", "liunyao"}:
             yield event.plain_result("当前仅支持六爻。\n\n" + self._help_text())
@@ -210,6 +223,9 @@ class LiuyaoPlugin(
     @filter.command("ping")
     async def llm_ping_command(self, event: AstrMessageEvent):
         """用最小请求检查当前会话的模型调用状态，不执行起卦或扣减额度。"""
+        if error := await self._user_access_error(event):
+            yield event.plain_result(error)
+            return
         caster_name, sender_id = self._caster_identity(event)
         await self._send_caster_reply(
             event,
@@ -254,7 +270,12 @@ class LiuyaoPlugin(
     @filter.on_llm_request()
     async def configure_liuyao_agent_tools(self, event: AstrMessageEvent, req: Any) -> None:
         """Offer only command help when direct Agent access is disabled."""
-        if self._config_get("agent_tools_enabled", True):
+        blocked = (
+            await self._user_access_error(event)
+            if callable(getattr(event, "get_sender_id", None))
+            else ""
+        )
+        if self._config_get("agent_tools_enabled", True) and not blocked:
             return
         toolset = getattr(req, "func_tool", None)
         if toolset is None:
@@ -262,7 +283,10 @@ class LiuyaoPlugin(
         # Keep filtering local to this request, even if a tool set is shared.
         filtered = copy.copy(toolset)
         filtered.tools = [
-            tool for tool in toolset.tools if tool.name not in AGENT_ACTION_TOOL_NAMES
+            tool
+            for tool in toolset.tools
+            if tool.name not in AGENT_ACTION_TOOL_NAMES
+            and not (blocked and tool.name == "get_liuyao_help")
         ]
         req.func_tool = filtered
 
@@ -274,8 +298,10 @@ class LiuyaoPlugin(
         不代用户执行指令、不起卦、不解卦、不读取历史卦例，也不编造执行结果。
         本工具不消耗六爻额度，未开启六爻的群也可查询使用方法。
         """
-        return self._agent_tools_disabled_reply() or (
-            "当前允许 AI 直接使用六爻插件；用户也可亲自发送以下指令。\n\n" + self._help_text()
+        return (
+            await self._user_access_error(event)
+            or self._agent_tools_disabled_reply()
+            or ("当前允许 AI 直接使用六爻插件；用户也可亲自发送以下指令。\n\n" + self._help_text())
         )
 
     def _agent_tools_disabled_reply(self) -> str:
@@ -288,7 +314,11 @@ class LiuyaoPlugin(
         )
 
     async def _agent_tool_gate(self, event: AstrMessageEvent) -> str:
-        return self._agent_tools_disabled_reply() or await self._group_gate(event, METHOD_LIUYAO)
+        return (
+            await self._user_access_error(event)
+            or self._agent_tools_disabled_reply()
+            or await self._group_gate(event, METHOD_LIUYAO)
+        )
 
     # ------------------------------------------------------------------
     @filter.llm_tool(name="cast_liuyao")
@@ -504,6 +534,8 @@ class LiuyaoPlugin(
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def collect_shefu_answer(self, event: AstrMessageEvent):
         """Capture explicit reveals and show help for configured bot mentions."""
+        if await self._user_access_error(event):
+            return
         if self._should_reply_mention_help(event):
             reply = await self._help_reply(event)
             if reply:
@@ -866,6 +898,8 @@ class LiuyaoPlugin(
 
     async def _help_reply(self, event: AstrMessageEvent) -> str:
         """Send one help card, retaining the full text if rendering or delivery fails."""
+        if error := await self._user_access_error(event):
+            return error
         text = self._help_text()
         image_path: Path | None = None
         try:
@@ -896,6 +930,8 @@ class LiuyaoPlugin(
         tail: str,
     ) -> str:
         """保留群开关与帮助；其他文本统一走 AI 预审起卦。"""
+        if error := await self._user_access_error(event):
+            return error
         text = (tail or "").strip()
         if not text:
             return await self._help_reply(event)
@@ -939,9 +975,14 @@ class LiuyaoPlugin(
             elif lease.quota_unlimited:
                 progress_text = "已收到，正在为你起卦并解读；本次不受每日 AI 额度限制。"
             elif lease.already_counted:
-                progress_text = "已收到，正在为你起卦并解读；本次请求已计入今日额度，不重复扣减。"
+                progress_text = "已收到，正在为你起卦并解读；本次请求已计入额度，不重复扣减。"
+            elif lease.source == "gift":
+                progress_text = (
+                    "已收到，正在为你起卦并解读；每日额度已用完，本次预留 1 次赠送额度。"
+                )
             else:
                 progress_text = "已收到，正在为你起卦并解读；本次已预留 1 次今日 AI 解读额度。"
+            progress_text += "\n" + await self._ai_quota_brief(event)
             await self._send_caster_reply(event, sender_id, caster_name, progress_text)
 
             review = None
@@ -1278,6 +1319,8 @@ class LiuyaoPlugin(
     # Per-group, per-divination-method state and administrator checks
     # ------------------------------------------------------------------
     async def _group_gate(self, event: AstrMessageEvent, method: str) -> str:
+        if error := await self._user_access_error(event):
+            return error
         group_id = str(event.get_group_id() or "").strip()
         if not group_id:
             return "六爻起卦仅面向 QQ 群聊使用。"
@@ -1568,4 +1611,5 @@ class LiuyaoPlugin(
         return getattr(obj, key, None)
 
     async def terminate(self):
+        self._admin_page_active = False
         logger.info("liuyao 插件已卸载")

@@ -15,6 +15,7 @@ from astrbot.api import logger
 
 BEIJING = timezone(timedelta(hours=8))
 STORAGE_ERROR = "AI 次数记录读取或保存失败，本次暂不调用 AI，请稍后重试。"
+GIFT_RESERVATION_SECONDS = 900
 
 
 class AIQuotaStorageError(RuntimeError):
@@ -43,6 +44,7 @@ class AIQuotaLease:
     error: str = ""
     already_counted: bool = False
     quota_unlimited: bool = False
+    source: str = "daily"
     _finished: bool = False
 
     async def commit(self) -> None:
@@ -127,9 +129,7 @@ class DailyAIQuotaMixin:
             observed_at = observed_at.replace(tzinfo=BEIJING)
         return observed_at.astimezone(BEIJING)
 
-    async def _valid_feedback_counts(
-        self, event: Any, window_days: set[int]
-    ) -> dict[int, int]:
+    async def _valid_feedback_counts(self, event: Any, window_days: set[int]) -> dict[int, int]:
         if not window_days:
             return {}
         sender = str(event.get_sender_id() or "").strip()
@@ -178,9 +178,7 @@ class DailyAIQuotaMixin:
         now = self._ai_daily_now().astimezone(BEIJING)
         return {
             days: sum(
-                1
-                for observed_at in timestamps
-                if now - timedelta(days=days) <= observed_at <= now
+                1 for observed_at in timestamps if now - timedelta(days=days) <= observed_at <= now
             )
             for days in window_days
         }
@@ -206,9 +204,7 @@ class DailyAIQuotaMixin:
         return 1 if default is None else default
 
     @staticmethod
-    def _feedback_rule_bonus(
-        rules: list[dict[str, Any]], counts: dict[int, int]
-    ) -> int:
+    def _feedback_rule_bonus(rules: list[dict[str, Any]], counts: dict[int, int]) -> int:
         return sum(
             rule["daily_bonus"]
             for rule in rules
@@ -222,9 +218,7 @@ class DailyAIQuotaMixin:
         rules = self._ai_quota_feedback_rules()
         if not rules:
             return base_limit
-        counts = await self._valid_feedback_counts(
-            event, {rule["window_days"] for rule in rules}
-        )
+        counts = await self._valid_feedback_counts(event, {rule["window_days"] for rule in rules})
         return min(10000, base_limit + self._feedback_rule_bonus(rules, counts))
 
     def _is_ai_quota_whitelisted(self, event: Any) -> bool:
@@ -268,11 +262,7 @@ class DailyAIQuotaMixin:
         message_id = getattr(message, "message_id", None)
         if message_id is None or not str(message_id).strip():
             get_extra = getattr(event, "get_extra", None)
-            token = (
-                get_extra("ai_daily_quota_message_token", None)
-                if callable(get_extra)
-                else None
-            )
+            token = get_extra("ai_daily_quota_message_token", None) if callable(get_extra) else None
             if not token:
                 token = getattr(event, "_ai_daily_quota_message_token", None)
             if not token:
@@ -307,7 +297,67 @@ class DailyAIQuotaMixin:
                     raise ValueError("invalid quota entry")
         return record
 
+    @staticmethod
+    def _gift_key(sender: str) -> str:
+        return "liuyao_gift_quota_v1:" + hashlib.sha256(sender.encode()).hexdigest()
+
+    async def _load_gift_record(self, key: str) -> dict[str, Any]:
+        record = await self._load_daily_record(key)
+        balance = record.setdefault("balance", 0)
+        if type(balance) is not int or balance < 0:
+            raise ValueError("invalid gift balance")
+        # A process crash before commit must not lock a gifted credit forever.
+        # Expired leases cannot commit: _finish_ai_daily reloads through this path.
+        now = self._ai_daily_now().timestamp()
+        for entries in record["days"].values():
+            for token, entry in list(entries.items()):
+                expires = entry.get("expires_at")
+                if not entry["used"] and isinstance(expires, (int, float)) and expires <= now:
+                    del entries[token]
+        return record
+
+    @staticmethod
+    def _gift_available(record: dict[str, Any]) -> int:
+        pending = sum(
+            1
+            for entries in record["days"].values()
+            for entry in entries.values()
+            if not entry["used"] and entry["holds"]
+        )
+        return max(0, record["balance"] - pending)
+
+    async def _gift_remaining(self, event: Any) -> int:
+        async with self._daily_lock():
+            record = await self._load_gift_record(
+                self._gift_key(str(event.get_sender_id() or "").strip())
+            )
+            return self._gift_available(record)
+
+    async def _ai_quota_brief(self, event: Any) -> str:
+        try:
+            limit = await self._effective_ai_daily_limit(event)
+            key, _ = self._daily_identity(event)
+            async with self._daily_lock():
+                record = await self._load_daily_record(key)
+                entries = record["days"].get(self._ai_daily_now().date().isoformat(), {})
+                used = sum(bool(e["used"] or e["holds"]) for e in entries.values())
+                gift = await self._load_gift_record(
+                    self._gift_key(str(event.get_sender_id() or "").strip())
+                )
+                extra = self._gift_available(gift)
+            remaining = (
+                "不限"
+                if not limit or self._is_ai_quota_whitelisted(event)
+                else str(max(0, limit - used))
+            )
+            return f"额度余量：{remaining}{f' +{extra}' if extra else ''} 次（已扣除本次预留）。"
+        except Exception:
+            return "额度余量暂时无法读取，可稍后发送 /额度 查询。"
+
     async def _reserve_ai_daily(self, event: Any) -> AIQuotaLease:
+        gate = getattr(self, "_user_access_error", None)
+        if callable(gate) and (error := await gate(event)):
+            return AIQuotaLease(self, error=error)
         if self._is_ai_quota_whitelisted(event):
             # A whitelist bypass still performs the model work, but stores no quota entry.
             return AIQuotaLease(self, quota_unlimited=True, _finished=True)
@@ -315,6 +365,7 @@ class DailyAIQuotaMixin:
             # Event/session data may be changed by other framework handlers.
             # Freeze the admission identity before the first await.
             key, token = self._daily_identity(event)
+            gift_key = self._gift_key(str(event.get_sender_id() or "").strip())
             now = self._ai_daily_now().astimezone(BEIJING)
             day = now.date().isoformat()
             yesterday = (now.date() - timedelta(days=1)).isoformat()
@@ -325,7 +376,7 @@ class DailyAIQuotaMixin:
         # A cancellation during the persistent write must not leave an unused
         # reservation behind. Wait for its outcome, then release it.
         task = asyncio.create_task(
-            self._reserve_ai_daily_uninterrupted(key, token, day, yesterday, limit)
+            self._reserve_ai_daily_uninterrupted(key, token, day, yesterday, limit, gift_key)
         )
         lease, cancelled = await _wait_persistent_task(task)
         if cancelled:
@@ -334,12 +385,17 @@ class DailyAIQuotaMixin:
         return lease
 
     async def _ai_quota_status(self, event: Any) -> str:
+        gate = getattr(self, "_user_access_error", None)
+        if callable(gate) and (error := await gate(event)):
+            return error
         now = self._ai_daily_now().astimezone(BEIJING)
         reset_at = datetime.combine(
             now.date() + timedelta(days=1), datetime.min.time(), tzinfo=BEIJING
         )
         reset_text = reset_at.strftime("%Y-%m-%d %H:%M:%S")
         try:
+            gift_remaining = await self._gift_remaining(event)
+            gift_suffix = f" +{gift_remaining}" if gift_remaining else ""
             score = await self._feedback_score(event)
             rules = self._ai_quota_feedback_rules()
             counts = await self._valid_feedback_counts(
@@ -361,13 +417,11 @@ class DailyAIQuotaMixin:
                 else "\n反馈奖励规则：未配置，当前无额外额度"
             )
             quota_detail = (
-                f"基础 {base_limit} 次 + 反馈奖励 {applied_bonus} 次"
-                if base_limit > 0
-                else "不限"
+                f"基础 {base_limit} 次 + 反馈奖励 {applied_bonus} 次" if base_limit > 0 else "不限"
             )
             if self._is_ai_quota_whitelisted(event):
                 return (
-                    "六爻 AI 每日额度：白名单，不限\n"
+                    f"六爻 AI 每日额度：白名单，不限{gift_suffix}\n"
                     f"反馈积分：{score}\n"
                     f"额度恢复时间：北京时间 {reset_text}{rule_progress}"
                 )
@@ -375,21 +429,17 @@ class DailyAIQuotaMixin:
             key, _ = self._daily_identity(event)
             record = await self._load_daily_record(key)
             entries = record["days"].get(now.date().isoformat(), {})
-            used = sum(
-                1
-                for entry in entries.values()
-                if entry.get("used") or entry.get("holds")
-            )
+            used = sum(1 for entry in entries.values() if entry.get("used") or entry.get("holds"))
             if limit == 0:
                 return (
-                    "六爻 AI 每日额度：不限\n"
+                    f"六爻 AI 每日额度：不限{gift_suffix}\n"
                     f"反馈积分：{score}\n"
                     f"额度恢复时间：北京时间 {reset_text}{rule_progress}"
                 )
             remaining = max(0, limit - used)
             return (
                 f"六爻 AI 每日额度：{limit} 次（{quota_detail}）\n"
-                f"今日已用：{used} 次，剩余：{remaining} 次\n"
+                f"今日已用：{used} 次，剩余：{remaining}{gift_suffix} 次\n"
                 f"反馈积分：{score}\n"
                 f"额度恢复时间：北京时间 {reset_text}{rule_progress}"
             )
@@ -398,7 +448,13 @@ class DailyAIQuotaMixin:
             return "暂时无法读取六爻 AI 额度信息，请稍后重试。"
 
     async def _reserve_ai_daily_uninterrupted(
-        self, key: str, token: str, day: str, yesterday: str, limit: int
+        self,
+        key: str,
+        token: str,
+        day: str,
+        yesterday: str,
+        limit: int,
+        gift_key: str = "",
     ) -> AIQuotaLease:
         try:
             async with self._daily_lock():
@@ -416,6 +472,21 @@ class DailyAIQuotaMixin:
                         break
                 entries = days.setdefault(day, {})
                 existing = entries.get(token)
+                # Gift reservations live in one QQ-account record across platforms.
+                # Check them before admitting a retry into a newly reset daily quota.
+                gift_record = await self._load_gift_record(gift_key) if gift_key else None
+                gift_token = key + ":" + token
+                gift_day = day
+                gift_existing = None
+                if gift_record is not None:
+                    for recorded_day, recorded_entries in gift_record["days"].items():
+                        if gift_token in recorded_entries:
+                            gift_day, gift_existing = recorded_day, recorded_entries[gift_token]
+                            break
+                if gift_existing is not None:
+                    return await self._reserve_gift_locked(
+                        gift_key, gift_token, gift_day, yesterday, gift_record
+                    )
                 if existing and existing["used"]:
                     return AIQuotaLease(
                         self,
@@ -427,6 +498,10 @@ class DailyAIQuotaMixin:
                         _finished=True,
                     )
                 if existing is None and limit and len(entries) >= limit:
+                    if gift_record is not None and self._gift_available(gift_record) > 0:
+                        return await self._reserve_gift_locked(
+                            gift_key, gift_token, day, yesterday, gift_record
+                        )
                     return AIQuotaLease(
                         self,
                         error=(
@@ -458,17 +533,58 @@ class DailyAIQuotaMixin:
             logger.error(f"AI 日限额读取或预约失败：{type(exc).__name__}")
             return AIQuotaLease(self, error=STORAGE_ERROR)
 
+    async def _reserve_gift_locked(
+        self, key: str, token: str, day: str, yesterday: str, record: dict[str, Any]
+    ) -> AIQuotaLease:
+        # Keep unexpired reservations across midnight. Balance is
+        # decremented only on first commit, atomically with the reservation entry.
+        for old_day, entries in list(record["days"].items()):
+            if old_day < yesterday:
+                record["days"][old_day] = {
+                    t: e for t, e in entries.items() if e["holds"] or t == token
+                }
+                if not record["days"][old_day]:
+                    del record["days"][old_day]
+        entries = record["days"].setdefault(day, {})
+        existing = entries.get(token)
+        if existing and existing["used"]:
+            return AIQuotaLease(
+                self, key, day, token, already_counted=True, source="gift", _finished=True
+            )
+        hold = uuid.uuid4().hex
+        entry = entries.setdefault(
+            token,
+            {
+                "used": False,
+                "holds": [],
+                "expires_at": self._ai_daily_now().timestamp() + GIFT_RESERVATION_SECONDS,
+            },
+        )
+        entry["holds"].append(hold)
+        await self.put_kv_data(key, record)
+        return AIQuotaLease(
+            self, key, day, token, hold, already_counted=existing is not None, source="gift"
+        )
+
     async def _finish_ai_daily(self, lease: AIQuotaLease, *, used: bool) -> None:
         async def finish() -> None:
             try:
                 async with self._daily_lock():
                     if lease._finished:
                         return
-                    record = await self._load_daily_record(lease.key)
+                    record = (
+                        await self._load_gift_record(lease.key)
+                        if lease.source == "gift"
+                        else await self._load_daily_record(lease.key)
+                    )
                     entries = record["days"].get(lease.day, {})
                     entry = entries.get(lease.token)
                     if entry is None or lease.hold not in entry["holds"]:
                         raise ValueError("quota reservation disappeared")
+                    if lease.source == "gift" and used and not entry["used"]:
+                        if record["balance"] <= 0:
+                            raise ValueError("gift balance exhausted")
+                        record["balance"] -= 1
                     entry["used"] = entry["used"] or used
                     entry["holds"].remove(lease.hold)
                     if not entry["used"] and not entry["holds"]:
