@@ -55,7 +55,7 @@ def test_default_remark_uses_primary_hexagram_and_actual_chart_position(
     assert cast.primary_number != cast.changed_number
     assert requested == [(cast.primary_number, chart["shi"])]
     assert "龙可飞天，莫顶破天。" in texts
-    assert any(text.startswith("先人小语 · 乾卦 · 世居") for text in texts)
+    assert any(text.startswith("可可子の短评 · 乾卦 · 世居") for text in texts)
     assert not any("AI助手：" in text or "卦象已成" in text for text in texts)
 
 

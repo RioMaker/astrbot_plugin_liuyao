@@ -233,7 +233,7 @@ class LiuyaoImageRenderer:
         cast_at: datetime | None,
         agent_name: str = "AI助手",
         ai_comment: str = "",
-        comment_title: str = "先人小语",
+        comment_title: str = "可可子の短评",
         output_path: str | Path | None = None,
     ) -> Path:
         primary = self.corpus.get(cast.primary_number)
@@ -291,7 +291,7 @@ class LiuyaoImageRenderer:
         else:
             comment = get_shi_remark(cast.primary_number, chart.get("shi"))
             position = LINE_LABELS.get(chart.get("shi"), "未定")
-            heading = f"先人小语 · {primary['name']}卦 · 世居{position}"
+            heading = f"可可子の短评 · {primary['name']}卦 · 世居{position}"
         comment_lines = wrap(comment, f["body"], 1064)
         comment_heading = wrap(heading, f["body"], 1064)
         comment_height = 48 + len(comment_heading) * 40 + len(comment_lines) * 40

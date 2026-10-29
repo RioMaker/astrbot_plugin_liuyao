@@ -258,18 +258,26 @@ class LiuyaoFeedbackCardRenderer:
         rule_y = y + 78
         for rule in rules:
             count, required = rule["count"], rule["minimum_feedback_count"]
-            label = f"{rule['window_days']}天内反馈"
-            self._text(draw, MARGIN + 26, rule_y, label, 26)
-            bar_x, bar_width = MARGIN + 276, 380
-            draw.rounded_rectangle(
-                (bar_x, rule_y + 7, bar_x + bar_width, rule_y + 23), radius=8, fill=RULE
+            label = f"{rule['window_days']}天内 · 每日+{rule['daily_bonus']}次"
+            detail = f"{count}/{required} · " + (
+                f"还差 {required - count} 次" if count < required else "已达标"
             )
-            fill = round(bar_width * min(1, count / required))
-            if fill:
+            self._text(draw, MARGIN + 26, rule_y, label, 26)
+            bar_x = max(MARGIN + 276, MARGIN + 50 + draw.textlength(label, font=self._font(26)))
+            bar_right = min(
+                MARGIN + 656,
+                WIDTH - MARGIN - 50 - draw.textlength(detail, font=self._font(26)),
+            )
+            bar_width = max(0, bar_right - bar_x)
+            if bar_width:
                 draw.rounded_rectangle(
-                    (bar_x, rule_y + 7, bar_x + fill, rule_y + 23), radius=8, fill=JADE
+                    (bar_x, rule_y + 7, bar_right, rule_y + 23), radius=8, fill=RULE
                 )
-            detail = f"{count}/{required} · 每日 +{rule['daily_bonus']} 次"
+                fill = round(bar_width * min(1, count / required))
+                if fill:
+                    draw.rounded_rectangle(
+                        (bar_x, rule_y + 7, bar_x + fill, rule_y + 23), radius=8, fill=JADE
+                    )
             draw.text(
                 (WIDTH - MARGIN - 26, rule_y), detail, font=self._font(26), fill=JADE, anchor="rt"
             )
@@ -277,9 +285,15 @@ class LiuyaoFeedbackCardRenderer:
         if not rules:
             self._text(draw, MARGIN + 26, rule_y - 3, "暂无加额规则", 24, MUTED)
         y += panel_height + 32
-        self._text(draw, MARGIN, y, "查看 /反馈 编号    提交 /反馈 编号 实际进展", 28, JADE)
+        example_number = str(rows[0][0]["serial"]) if rows else "编号"
+        self._text(draw, MARGIN, y, f"看原卦：/反馈 {example_number}", 28, JADE)
         self._text(
-            draw, MARGIN, y + 48, "未应验也可通过；每例通过计 1 次，未通过可补充。", 25, MUTED
+            draw,
+            MARGIN,
+            y + 48,
+            f"交反馈：/反馈 {example_number} 实际发生了……，与原断相比……",
+            28,
+            JADE,
         )
         if pages > 1:
             navigation = []

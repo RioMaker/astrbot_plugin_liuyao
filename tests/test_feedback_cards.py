@@ -79,6 +79,8 @@ def test_queue_is_one_compact_image_with_reward_progress_and_cleanup():
         kind, values = plugin.feedback_card.calls[0]
         assert kind == "queue" and [c["serial"] for c in values["cases"]] == [302, 905]
         assert values["rules"][0]["count"] == 0
+        assert "看原卦：/反馈 302" in plugin.feedback_card.texts
+        assert any(text.startswith("交反馈：/反馈 302 ") for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         assert "JSON" not in " ".join(plugin.feedback_card.texts)
 
@@ -92,6 +94,9 @@ def test_queue_pagination_does_not_confuse_page_number_with_case_number():
         kind, values = plugin.feedback_card.calls[0]
         assert kind == "queue" and values["page"] == 2 and values["total"] == 10
         assert [c["serial"] for c in values["cases"]] == [9, 10]
+        assert "看原卦：/反馈 9" in plugin.feedback_card.texts
+        assert any(text.startswith("交反馈：/反馈 9 ") for text in plugin.feedback_card.texts)
+        assert not any("/反馈 302" in text for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         await command(plugin, event, "列表 99")
         assert "超出范围" in plugin.feedback_card.calls[-1][1]["text"]
@@ -306,7 +311,7 @@ def test_saved_calendar_snapshot_is_rendered_without_recomputing(monkeypatch, tm
 
 
 def test_long_questions_and_empty_queue_have_bounded_readable_layout(tmp_path):
-    renderer = LiuyaoFeedbackCardRenderer()
+    renderer = RecordingCard()
     long = renderer.render_queue(
         cases=[case(n, question="项目进展及合作条件" * 25) for n in range(1, 9)],
         total=20,
@@ -316,6 +321,7 @@ def test_long_questions_and_empty_queue_have_bounded_readable_layout(tmp_path):
         rules=[],
         output_path=tmp_path / "long.png",
     )
+    renderer.texts.clear()
     empty = renderer.render_queue(
         cases=[],
         total=0,
@@ -329,3 +335,30 @@ def test_long_questions_and_empty_queue_have_bounded_readable_layout(tmp_path):
         assert 1000 < image.height < 2000
     with Image.open(empty) as image:
         assert 400 < image.height < 800
+    assert "看原卦：/反馈 编号" in renderer.texts
+    assert any(text.startswith("交反馈：/反馈 编号 ") for text in renderer.texts)
+
+
+@pytest.mark.parametrize(("count", "status"), [(1, "还差 2 次"), (3, "已达标"), (5, "已达标")])
+def test_queue_reward_progress_reports_remaining_or_earned(tmp_path, monkeypatch, count, status):
+    from PIL import ImageDraw
+
+    drawn = []
+    original = ImageDraw.ImageDraw.text
+
+    def record(self, xy, text, *args, **kwargs):
+        drawn.append(str(text))
+        return original(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", record)
+    LiuyaoFeedbackCardRenderer().render_queue(
+        cases=[],
+        total=0,
+        page=1,
+        pages=1,
+        score=count,
+        rules=[dict(window_days=3, count=count, minimum_feedback_count=3, daily_bonus=1)],
+        output_path=tmp_path / "reward.png",
+    )
+    assert f"{count}/3 · {status}" in drawn
+    assert "3天内 · 每日+1次" in drawn
