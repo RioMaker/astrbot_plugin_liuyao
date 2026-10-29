@@ -80,9 +80,31 @@ def test_queue_is_one_compact_image_with_reward_progress_and_cleanup():
         assert kind == "queue" and [c["serial"] for c in values["cases"]] == [302, 905]
         assert values["rules"][0]["count"] == 0
         assert "看原卦：/反馈 302" in plugin.feedback_card.texts
+        assert "原断：将如期完成" in plugin.feedback_card.texts
         assert any(text.startswith("交反馈：/反馈 302 ") for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         assert "JSON" not in " ".join(plugin.feedback_card.texts)
+
+    asyncio.run(run())
+
+
+def test_queue_shows_one_line_of_original_conclusion_without_analysis_or_model_call():
+    async def run():
+        long_verdict = "预计月底签约，但需要先确认交付条件。" * 10
+        plugin, event = display_plugin(
+            records=[
+                case(302, verdict=long_verdict, analysis="内部推导不应出现"),
+                case(905, verdict="", analysis="内部推导不应出现\n断语：本月暂难落实。"),
+                case(906, verdict="", analysis="内部推导不应出现"),
+            ]
+        )
+        assert await command(plugin, event, "") == []
+        conclusions = [text for text in plugin.feedback_card.texts if text.startswith("原断：")]
+        assert len(conclusions) == 3
+        assert conclusions[0].endswith("…") and len(conclusions[0]) < len(long_verdict)
+        assert conclusions[1:] == ["原断：本月暂难落实。", "原断：未保存"]
+        assert not any("内部推导" in text for text in plugin.feedback_card.texts)
+        assert not plugin.context.calls
 
     asyncio.run(run())
 

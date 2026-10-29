@@ -68,10 +68,10 @@ def short_time(value: Any, *, now: datetime | None = None) -> str:
     return timestamp.strftime("%m-%d %H:%M" if timestamp.year == year else "%Y-%m-%d %H:%M")
 
 
-def saved_conclusion(case: dict[str, Any]) -> str:
+def saved_conclusion(case: dict[str, Any], *, fallback: str = "该卦例未保存独立结论。") -> str:
     # Never fall back to the analysis body: old cases may have no separate verdict.
     text = str(case.get("verdict") or "").strip() or extract_verdict(case.get("analysis", ""))
-    return text or "该卦例未保存独立结论。"
+    return text or fallback
 
 
 def case_cast(case: dict[str, Any]) -> CastResult:
@@ -188,7 +188,7 @@ class LiuyaoFeedbackCardRenderer:
                 width=CONTENT_WIDTH - QUEUE_TEXT_OFFSET,
                 limit=2,
             )
-            rows.append((case, lines, 60 + len(lines) * 44))
+            rows.append((case, lines, 90 + len(lines) * 44))
         height = 248 + sum(row[2] for row in rows) + 156 + len(rules) * 72 + 170
         if not rows:
             height += 82
@@ -226,6 +226,13 @@ class LiuyaoFeedbackCardRenderer:
             x = MARGIN + QUEUE_TEXT_OFFSET
             for index, line in enumerate(lines):
                 self._text(draw, x, y + index * 44, line, 31)
+            conclusion = self._lines(
+                f"原断：{saved_conclusion(case, fallback='未保存')}",
+                25,
+                CONTENT_WIDTH - QUEUE_TEXT_OFFSET,
+                1,
+            )[0]
+            self._text(draw, x, y + len(lines) * 44 + 2, conclusion, 25, JADE)
             cast = case.get("cast") or {}
             names = str(cast.get("primary_name") or "卦名未记录")
             if cast.get("changed_name") and cast.get("moving_lines"):
@@ -234,7 +241,7 @@ class LiuyaoFeedbackCardRenderer:
             self._text(
                 draw,
                 x,
-                y + len(lines) * 44 + 4,
+                y + len(lines) * 44 + 34,
                 self._lines(meta, 23, CONTENT_WIDTH - QUEUE_TEXT_OFFSET, 1)[0],
                 23,
                 MUTED,
