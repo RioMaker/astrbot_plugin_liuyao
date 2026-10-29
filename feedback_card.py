@@ -50,8 +50,9 @@ except ImportError:  # pragma: no cover
 
 QUEUE_PAGE_SIZE = 8
 CONTENT_WIDTH = WIDTH - 2 * MARGIN
-QUEUE_NUMBER_WIDTH = 190
-QUEUE_TEXT_OFFSET = 226
+QUEUE_NUMBER_WIDTH = 134
+QUEUE_NUMBER_SIZE = 36
+QUEUE_TEXT_OFFSET = 174
 # 旅卦：上离下艮，按从上爻到初爻的绘图顺序排列。
 TRAVEL_HEXAGRAM_TOP_DOWN = (1, 0, 1, 1, 0, 0)
 
@@ -164,20 +165,15 @@ class LiuyaoFeedbackCardRenderer:
         self._text(draw, MARGIN, 119, "查看卦例与原断，再填写实际进展", 25, MUTED)
         y = 172
         for case, lines, row_height in rows:
-            number_height = row_height - 28
+            number_height = 52
             draw.rounded_rectangle(
                 (MARGIN, y, MARGIN + QUEUE_NUMBER_WIDTH, y + number_height),
                 radius=10,
                 fill=JADE,
             )
             number = str(case["serial"])
-            size = 128
-            while size > 20:
-                font = self._font(size)
-                left, top, right, bottom = font.getbbox(number)
-                if right - left <= QUEUE_NUMBER_WIDTH - 24 and bottom - top <= number_height - 12:
-                    break
-                size -= 1
+            font = self._font(QUEUE_NUMBER_SIZE)
+            left, top, right, bottom = font.getbbox(number)
             draw.text(
                 (
                     MARGIN + (QUEUE_NUMBER_WIDTH - (right - left)) / 2 - left,
