@@ -73,6 +73,7 @@ class LiuyaoCaseStoreMixin:
                             and existing.get("cast", {}).get("lines") == list(cast.lines)
                         ):
                             # Keep the first prediction and its feedback queue intact.
+                            await self._link_token_case(existing)
                             case_id = "" if existing.get("analysis") else str(existing["id"])
                             return case_id, "", "复用原卦例；已有原断保持不变。"
                 references = search_cases(
@@ -104,6 +105,7 @@ class LiuyaoCaseStoreMixin:
                     LIUYAO_CASES_KEY,
                     serialize_case_store(trim_cases(cases, maximum), payload),
                 )
+                await self._link_token_case(case)
             if not track_agent:
                 return str(case["id"]), format_case_references(references), "排盘已保存。"
             pending = getattr(self, "_pending_agent_cases", None)

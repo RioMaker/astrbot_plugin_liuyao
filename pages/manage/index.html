@@ -8,7 +8,7 @@
 </head>
 <body>
   <main>
-    <header><div><div class="eyebrow">六爻起卦 / 管理中心</div><h1>用户与卦例</h1><p>查看起卦记录，管理使用权限与赠送额度。</p></div><button id="refresh" class="secondary">刷新数据</button></header>
+    <header><div><div class="eyebrow">六爻起卦 / 管理中心</div><h1>用户、卦例与用量</h1><p>查看起卦记录与 Token 消耗，管理使用权限与赠送额度。</p></div><button id="refresh" class="secondary">刷新数据</button></header>
     <div id="notice" role="status" aria-live="polite" hidden></div>
     <section class="metrics" aria-label="概览">
       <div><span>已记录用户</span><strong id="stat-users">—</strong></div>
@@ -17,12 +17,30 @@
       <div><span>已封禁用户</span><strong id="stat-banned">—</strong></div>
     </section>
     <section class="panel">
-      <nav aria-label="管理分类"><button id="tab-users" class="tab active" aria-pressed="true">用户管理</button><button id="tab-cases" class="tab" aria-pressed="false">卦例管理</button></nav>
+      <nav aria-label="管理分类"><button id="tab-users" class="tab active" aria-pressed="true">用户管理</button><button id="tab-cases" class="tab" aria-pressed="false">卦例管理</button><button id="tab-usage" class="tab" aria-pressed="false">Token 统计</button></nav>
+      <div id="usage-summary" hidden>
+        <section class="metrics token-metrics" aria-label="Token 消耗概览">
+          <div><span>累计 Token</span><strong id="token-all">—</strong></div>
+          <div><span>今日 Token</span><strong id="token-today">—</strong></div>
+          <div><span>本周 Token · 周一起</span><strong id="token-week">—</strong></div>
+          <div><span>本月 Token</span><strong id="token-month">—</strong></div>
+        </section>
+        <p id="usage-coverage" class="hint"></p>
+      </div>
       <form id="search-form" class="toolbar">
         <label class="search"><span class="sr-only">搜索用户或卦例</span><input id="search" type="search" maxlength="200" placeholder="搜索 QQ 号、昵称或群号"></label>
         <label><span class="sr-only">筛选状态</span><select id="state"><option value="all">全部用户</option><option value="active">正常使用</option><option value="banned">已封禁</option></select></label>
         <button type="submit">搜索</button>
+        <div id="usage-filters" class="usage-filters" hidden>
+          <label>查看维度<select id="usage-view"><option value="cases">单卦消耗</option><option value="daily">每日消耗</option><option value="weekly">每周消耗</option><option value="monthly">每月消耗</option><option value="groups">各群消耗</option><option value="users">每人消耗</option></select></label>
+          <label>开始日期<input id="usage-start" type="date"></label>
+          <label>结束日期<input id="usage-end" type="date"></label>
+          <label>群号<input id="usage-group" inputmode="numeric" maxlength="128" placeholder="全部群"></label>
+          <label>QQ 号<input id="usage-sender" inputmode="numeric" maxlength="128" placeholder="全部用户"></label>
+          <button id="usage-reset" type="button" class="secondary">清空筛选</button>
+        </div>
       </form>
+      <p id="usage-selected" class="hint" hidden></p>
       <p id="table-hint" class="hint">每日额度优先使用；赠送额度跨日保留，用尽后自动隐藏 +n。</p>
       <div class="table-wrap"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
       <div id="empty" class="empty" hidden>暂无记录</div>

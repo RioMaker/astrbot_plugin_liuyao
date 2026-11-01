@@ -217,7 +217,12 @@ class ShefuMixin:
             if quota_error:
                 return quota_error + " 本次仅生成本地排盘。"
             response = await asyncio.wait_for(
-                context.llm_generate(chat_provider_id=provider, prompt=prompt),
+                self._token_llm(
+                    self._new_token_run(event, kind="legacy", question=question, cast=cast),
+                    "shefu",
+                    chat_provider_id=provider,
+                    prompt=prompt,
+                ),
                 timeout=self._bounded_config_int("agent_comment_timeout_seconds", 45, 5, 90),
             )
             result = str(getattr(response, "completion_text", "") or "").strip()

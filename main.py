@@ -42,6 +42,7 @@ if __package__:
     )
     from .shefu import ShefuMixin
     from .textcard import LiuyaoTextCardRenderer
+    from .token_usage import TokenUsageMixin
     from .user_management import UserManagementMixin
 else:  # pragma: no cover - direct local execution
     import prompts
@@ -70,13 +71,14 @@ else:  # pragma: no cover - direct local execution
     )
     from shefu import ShefuMixin
     from textcard import LiuyaoTextCardRenderer
+    from token_usage import TokenUsageMixin
     from user_management import UserManagementMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.28.0"
+PLUGIN_VERSION = "0.29.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -123,6 +125,7 @@ def _reply_card_chain(sender_id: str, image_path: str) -> list[Any]:
 )
 class LiuyaoPlugin(
     AdminPageMixin,
+    TokenUsageMixin,
     UserManagementMixin,
     DailyAIQuotaMixin,
     FeedbackReviewMixin,
@@ -248,7 +251,12 @@ class LiuyaoPlugin(
                 yield event.plain_result("六爻模型检测失败：当前会话没有绑定可用模型。")
                 return
             response = await asyncio.wait_for(
-                llm_generate(chat_provider_id=provider, prompt="请仅回复 PONG。"),
+                self._token_llm(
+                    self._new_token_run(event, kind="ping", question="模型检测"),
+                    "ping",
+                    chat_provider_id=provider,
+                    prompt="请仅回复 PONG。",
+                ),
                 timeout=self._bounded_config_int("command_analysis_timeout_seconds", 60, 5, 180),
             )
             if getattr(response, "role", "") == "err":
@@ -611,7 +619,9 @@ class LiuyaoPlugin(
             if quota_error:
                 return base_intent, display_name, fallback_comment, quota_error
             response = await asyncio.wait_for(
-                llm_generate(
+                self._token_llm(
+                    self._new_token_run(event, kind="legacy", question=question, cast=cast),
+                    "chart_comment",
                     chat_provider_id=provider_id,
                     prompt=prompt,
                 ),
@@ -969,6 +979,12 @@ class LiuyaoPlugin(
             lease = await self._reserve_ai_daily(event)
         except AIQuotaStorageError:
             return "六爻 AI 日额度记录暂不可用，请稍后重试。"
+        token_run = self._new_token_run(
+            event,
+            kind="reuse" if original is not None else "cast",
+            question=question,
+            cast=original_cast,
+        )
         try:
             if lease.error:
                 progress_text = lease.error
@@ -1010,7 +1026,9 @@ class LiuyaoPlugin(
                         question=question,
                     )
                     response = await asyncio.wait_for(
-                        context.llm_generate(
+                        self._token_llm(
+                            token_run,
+                            "reuse_review" if original is not None else "pre_review",
                             chat_provider_id=provider,
                             prompt=review_prompt,
                         ),
@@ -1061,6 +1079,9 @@ class LiuyaoPlugin(
                     await lease.release()
                 return cast_error
 
+            if cast.cast_at is not None:
+                await self._bind_token_cast(token_run, cast)
+
             refusal = ""
             analysis = ""
             analysis_recordable = False
@@ -1096,7 +1117,9 @@ class LiuyaoPlugin(
                         max_chars=self._max_chars_instruction(self._reply_budget()),
                     )
                     response = await asyncio.wait_for(
-                        context.llm_generate(
+                        self._token_llm(
+                            token_run,
+                            "reuse_interpretation" if original is not None else "interpretation",
                             chat_provider_id=provider,
                             prompt=interpretation_prompt,
                         ),

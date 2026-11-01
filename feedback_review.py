@@ -394,7 +394,11 @@ class FeedbackReviewMixin:
             sort_keys=True,
         )
         response = await asyncio.wait_for(
-            self.context.llm_generate(
+            self._token_llm(
+                self._new_token_run(
+                    event, kind="feedback", question=case.get("question", ""), case=case
+                ),
+                "feedback",
                 chat_provider_id=provider,
                 system_prompt=session["system_prompt"],
                 contexts=copy.deepcopy(contexts),

@@ -6,9 +6,11 @@ from astrbot.api import logger
 
 if __package__:
     from .case_library import normalize_case_store
+    from .token_usage import case_usage_key, overview, summarize
     from .user_management import CASES_KEY, ManagementError, case_revision, require_text
 else:
     from case_library import normalize_case_store
+    from token_usage import case_usage_key, overview, summarize
     from user_management import CASES_KEY, ManagementError, case_revision, require_text
 
 
@@ -59,6 +61,8 @@ class AdminPageMixin:
             ("manage/cases", self._page_cases, False),
             ("manage/cases/<case_id>", self._page_case, False),
             ("manage/cases/<case_id>/update", self._admin_change_case, True),
+            ("manage/usage", self._page_usage, False),
+            ("manage/usage/<usage_id>", self._page_usage_detail, False),
         ):
             register(
                 f"/astrbot_plugin_liuyao/{route}",
@@ -105,8 +109,10 @@ class AdminPageMixin:
         ]
         filtered.sort(key=lambda u: u["last_cast_at"], reverse=True)
         result = self._page_result(filtered, page)
+        runs = await self._token_runs()
         async with self._daily_lock():
             for user in result["items"]:
+                user["token_usage"] = summarize([r for r in runs if r["caster_id"] == user["id"]])
                 gift = await self._load_gift_record(self._gift_key(user["id"]))
                 user["gift_remaining"] = self._gift_available(gift)
                 user.pop("audit", None)
@@ -120,7 +126,10 @@ class AdminPageMixin:
 
     async def _page_user(self, sender: str, *, query) -> dict:
         await self._ensure_user_registry()
-        return await self._admin_user_detail(sender)
+        user = await self._admin_user_detail(sender)
+        runs = [r for r in await self._token_runs() if r["caster_id"] == sender]
+        user["token_overview"] = overview(runs, self._ai_daily_now())
+        return user
 
     async def _page_cases(self, *, query) -> dict:
         search, page = self._page_options(query)
@@ -170,6 +179,11 @@ class AdminPageMixin:
             )
         rows.sort(key=lambda c: c["created_at"], reverse=True)
         result = self._page_result(rows, page)
+        runs = await self._token_runs()
+        keys = {c["id"]: case_usage_key(c) for c in cases}
+        for row in result["items"]:
+            row["usage_id"] = keys[row["id"]]
+            row["token_usage"] = summarize([r for r in runs if r["cast_key"] == row["usage_id"]])
         result["all_count"] = len(cases)
         return result
 
@@ -178,4 +192,11 @@ class AdminPageMixin:
         case = next((c for c in cases if c["id"] == case_id), None)
         if case is None:
             raise ManagementError("卦例不存在或已删除", 404)
-        return {"case": case, "revision": case_revision(case)}
+        key = case_usage_key(case)
+        runs = [r for r in await self._token_runs() if r["cast_key"] == key]
+        return {
+            "case": case,
+            "revision": case_revision(case),
+            "token_usage": summarize(runs),
+            "usage_id": key,
+        }
