@@ -292,6 +292,105 @@ def test_agent_tool_uses_same_retry_context_and_ignores_claimed_outcome():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("entrypoint", ["command", "tool"])
+@pytest.mark.parametrize(
+    "is_admin,common,admin,expected",
+    [
+        (False, "", "admin-feedback", "test-provider"),
+        (False, "common-feedback", "admin-feedback", "common-feedback"),
+        (True, "common-feedback", "admin-feedback", "admin-feedback"),
+        (True, "common-feedback", "", "common-feedback"),
+        (True, "", "", "test-provider"),
+        (True, " \t", None, "test-provider"),
+    ],
+)
+def test_feedback_models_apply_to_commands_and_tools_independently(
+    entrypoint, is_admin, common, admin, expected
+):
+    async def run():
+        plugin, event = setup(decision())
+        event._astrbot_admin = is_admin
+        event.message_obj.raw_message["sender"]["role"] = "owner"
+        plugin.config.update(
+            command_pre_review_provider_id="other-review",
+            command_interpretation_provider_id="other-reading",
+            admin_pre_review_provider_id="admin-review",
+            admin_interpretation_provider_id="admin-reading",
+            feedback_review_provider_id=common,
+            admin_feedback_review_provider_id=admin,
+            ai_daily_limit=1,
+        )
+        if expected != "test-provider":
+            plugin.context.get_current_chat_provider_id = AsyncMock(
+                side_effect=AssertionError("explicit feedback model must not resolve system model")
+            )
+        plugin._send_feedback_image = AsyncMock(return_value=False)
+        if entrypoint == "command":
+            replies = [
+                item async for item in plugin.liuyao_feedback_command(event, "1 实际延期两周")
+            ]
+            assert "已闭环" in replies[0]["text"]
+        else:
+            assert "已闭环" in await plugin.record_liuyao_feedback_tool(
+                event, "实际延期两周", case_id="case-1"
+            )
+        assert len(plugin.context.calls) == 1
+        assert plugin.context.calls[0]["chat_provider_id"] == expected
+        assert saved(plugin)["feedback_review"]["provider_id"] == expected
+        runs = await plugin._token_runs()
+        assert runs[0]["kind"] == "feedback" and runs[0]["calls"][0]["provider"] == expected
+        assert not any(k.startswith("ai_daily_quota_v1:") for k in plugin._test_store)
+
+    asyncio.run(run())
+
+
+def test_switching_feedback_model_preserves_retry_context_and_actual_token_accounting():
+    from test_token_usage import response
+
+    async def run():
+        plugin, event = setup()
+        event._astrbot_admin = True
+        plugin.context.llm_generate = AsyncMock(
+            side_effect=[
+                response(json.dumps(decision(valid=False)), 40, 10),
+                response(json.dumps(decision()), 100, 20),
+            ]
+        )
+        plugin.config["admin_feedback_review_provider_id"] = "feedback-first"
+        assert "未通过" in await plugin._feedback_reply(event, "1 挺准的")
+        plugin.config["admin_feedback_review_provider_id"] = "feedback-second"
+        assert "已闭环" in await plugin._feedback_reply(event, "1 实际延期两周")
+        first, second = [call.kwargs for call in plugin.context.llm_generate.await_args_list]
+        assert [first["chat_provider_id"], second["chat_provider_id"]] == [
+            "feedback-first",
+            "feedback-second",
+        ]
+        assert first["system_prompt"] == second["system_prompt"]
+        assert len(second["contexts"]) == 3 and second["contexts"][:1] == first["contexts"]
+        usage = {
+            call["provider"]: call["usage"]["total_tokens"]
+            for run in await plugin._token_runs()
+            for call in run["calls"]
+        }
+        assert usage == {"feedback-first": 50, "feedback-second": 120}
+
+    asyncio.run(run())
+
+
+def test_failed_explicit_feedback_model_does_not_switch_or_close_case():
+    async def run():
+        plugin, event = setup(RuntimeError("unavailable"))
+        plugin.config["feedback_review_provider_id"] = "selected-feedback"
+        plugin.context.get_current_chat_provider_id = AsyncMock(return_value="fallback")
+        assert "尚未记录" in await plugin._feedback_reply(event, "1 实际延期两周")
+        assert len(plugin.context.calls) == 1
+        assert plugin.context.calls[0]["chat_provider_id"] == "selected-feedback"
+        plugin.context.get_current_chat_provider_id.assert_not_awaited()
+        assert not saved(plugin)["feedback"]
+
+    asyncio.run(run())
+
+
 def test_no_provider_wrong_owner_disabled_library_and_missing_content_are_free():
     async def run():
         plugin, event = setup()

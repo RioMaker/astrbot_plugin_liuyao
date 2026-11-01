@@ -13,7 +13,12 @@ else:
     from user_management import ManagementError, require_text
 
 
-ADMIN_MODEL_KEYS = ("admin_pre_review_provider_id", "admin_interpretation_provider_id")
+MODEL_OVERRIDES = {
+    "command_pre_review_provider_id": "admin_pre_review_provider_id",
+    "command_interpretation_provider_id": "admin_interpretation_provider_id",
+    "feedback_review_provider_id": "admin_feedback_review_provider_id",
+}
+ADMIN_MODEL_KEYS = tuple(MODEL_OVERRIDES.values())
 
 
 class ModelSettingsMixin:
@@ -27,7 +32,7 @@ class ModelSettingsMixin:
 
     def _analysis_provider_config(self, event, config_key):
         if self._is_astrbot_admin(event):
-            admin_key = config_key.replace("command_", "admin_", 1)
+            admin_key = MODEL_OVERRIDES[config_key]
             configured = str(self._config_get(admin_key, "") or "").strip()
             if configured:
                 return configured, "管理员专用配置"
@@ -70,10 +75,7 @@ class ModelSettingsMixin:
             "revision": self._model_revision(values),
             "providers": self._model_choices(),
             "defaults": {
-                key.replace("admin_", "command_", 1): str(
-                    self._config_get(key.replace("admin_", "command_", 1), "") or ""
-                ).strip()
-                for key in ADMIN_MODEL_KEYS
+                key: str(self._config_get(key, "") or "").strip() for key in MODEL_OVERRIDES
             },
         }
 

@@ -4,7 +4,8 @@ import asyncio
 import copy
 import json
 import re
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from test_agent_analysis import ANALYSIS, QUESTION, prepare
@@ -12,11 +13,23 @@ from test_ai_daily_integration import used_count
 from test_token_usage import response
 
 from debug_trace import DebugTrace
+from main import LiuyaoPlugin
 from model_settings import ADMIN_MODEL_KEYS
 from token_usage import TOKEN_USAGE_KEY
 from user_management import ManagementError
 
 REVIEW = '{"reject":false,"intent":"事业"}'
+
+
+@pytest.fixture(autouse=True)
+def forward_components(monkeypatch):
+    components = ModuleType("astrbot.api.message_components")
+    components.Plain = lambda text: {"text": text}
+    components.Node = lambda **kwargs: kwargs
+    components.Nodes = lambda nodes: {"nodes": nodes}
+    components.Image = SimpleNamespace(fromFileSystem=lambda path: {"image": path})
+    monkeypatch.setitem(sys.modules, "astrbot.api.message_components", components)
+    monkeypatch.setattr(sys.modules["astrbot.api"], "message_components", components, raising=False)
 
 
 class Config(dict):
@@ -28,7 +41,9 @@ def admin_plugin():
     plugin, event = prepare(limit=1)
     event._astrbot_admin = True
     plugin.config = Config(plugin.config)
-    plugin.config.update(zip(ADMIN_MODEL_KEYS, ["admin-review", "admin-reading"], strict=True))
+    plugin.config.update(zip(ADMIN_MODEL_KEYS, ["admin-review", "admin-reading", ""], strict=True))
+    event.chain_result = lambda chain: {"chain": chain}
+    event.get_self_id = lambda: "90001"
     provider = SimpleNamespace(
         meta=lambda: SimpleNamespace(id="admin-review", model="model-a"),
         get_model=lambda: "model-a",
@@ -45,19 +60,28 @@ async def command(plugin, event, question=QUESTION):
     return [item async for item in plugin.liuyao_test_command(event, question)]
 
 
+def forwarded_nodes(event):
+    return [
+        node
+        for message in event.sent
+        for component in message.get("chain", [])
+        for node in component.get("nodes", [])
+    ]
+
+
 def trace_steps(event):
-    parts = {}
-    for message in event.sent:
-        header, _, body = message.get("text", "").partition("\n")
-        match = re.match(r"【六爻调试 [a-f0-9]+ · \d+ · (.+?)】", header)
-        if match:
-            parts.setdefault(match[1], []).append(body)
+    text = "".join(
+        component.get("text", "")
+        for node in forwarded_nodes(event)
+        for component in node["content"]
+    )
+    parts = re.split(r"【六爻调试 [a-f0-9]+ · \d+ · (.+?)】\n", text)
     result = {}
-    for title, chunks in parts.items():
+    for title, body in zip(parts[1::2], parts[2::2], strict=True):
         try:
-            result[title] = json.loads("".join(chunks))
+            result[title] = json.loads(body)
         except ValueError:
-            result[title] = "".join(chunks)
+            result[title] = body
     return result
 
 
@@ -98,7 +122,7 @@ def test_administrator_overrides_and_independent_fallback_for_normal_cast(
 ):
     async def run():
         plugin, event = admin_plugin()
-        plugin.config.update(zip(ADMIN_MODEL_KEYS, admin_values, strict=True))
+        plugin.config.update(zip(ADMIN_MODEL_KEYS[:2], admin_values, strict=True))
         plugin.config.update(
             command_pre_review_provider_id=common_values[0],
             command_interpretation_provider_id=common_values[1],
@@ -140,7 +164,13 @@ def test_debug_emits_actual_requests_results_usage_and_preserves_production_data
         assert len(steps["排盘结果"]["六爻（自下而上）"]) == 6
         assert steps["调试汇总"]["已知总 Token"] == 170
         assert steps["调试汇总"]["总量未知调用次数"] == 0
-        assert all(len(item["text"]) < 1700 for item in event.sent)
+        assert len(event.sent) == 1 and len(event.sent[0]["chain"]) == 1
+        assert "调试汇总" in forwarded_nodes(event)[0]["content"][0]["text"]
+        assert all(
+            len(part.get("text", "")) <= 3000
+            for node in forwarded_nodes(event)
+            for part in node["content"]
+        )
         assert "SECRET_PROVIDER_KEY" not in json.dumps(event.sent)
         assert {k: v for k, v in plugin._test_store.items() if k != TOKEN_USAGE_KEY} == {
             k: v for k, v in previous.items() if k != TOKEN_USAGE_KEY
@@ -274,20 +304,23 @@ def test_debug_storage_failure_prevents_unrecorded_model_calls():
     asyncio.run(run())
 
 
-def test_debug_message_failure_does_not_repeat_or_cancel_model_work():
+def test_forward_failure_sends_one_short_fallback_without_repeating_model_work():
     async def run():
         plugin, event = admin_plugin()
         send = event.send
 
         async def flaky(message):
-            if "预审请求" in message["text"]:
+            if "chain" in message:
                 raise OSError("delivery failed")
             await send(message)
 
         event.send = flaky
         await command(plugin, event)
         assert plugin.context.llm_generate.await_count == 2
-        assert trace_steps(event)["调试汇总"]["调试消息发送失败段数"] > 0
+        assert len(event.sent) == 1
+        assert "合并转发发送失败" in event.sent[0]["text"]
+        assert "已知 Token 170" in event.sent[0]["text"]
+        assert len(event.sent[0]["text"]) < 1000
 
     asyncio.run(run())
 
@@ -316,6 +349,7 @@ def test_model_settings_expose_only_safe_fields_save_immediately_and_detect_conf
             "revision": page["revision"],
             ADMIN_MODEL_KEYS[0]: "",
             ADMIN_MODEL_KEYS[1]: "admin-review",
+            ADMIN_MODEL_KEYS[2]: "admin-reading",
         }
         result = await plugin._admin_save_models(payload=payload, actor="admin")
         assert result["saved"] and plugin.config.persisted[ADMIN_MODEL_KEYS[1]] == "admin-review"
@@ -326,6 +360,11 @@ def test_model_settings_expose_only_safe_fields_save_immediately_and_detect_conf
         assert (
             await plugin._analysis_provider_id(event, "command_interpretation_provider_id")
             == "admin-review"
+        )
+        assert plugin.config.persisted[ADMIN_MODEL_KEYS[2]] == "admin-reading"
+        assert (
+            await plugin._analysis_provider_id(event, "feedback_review_provider_id")
+            == "admin-reading"
         )
         with pytest.raises(ManagementError, match="已变化"):
             await plugin._admin_save_models(payload=payload, actor="admin")
@@ -345,6 +384,7 @@ def test_model_settings_reject_invalid_values_without_mutating_config(bad):
                     "revision": page["revision"],
                     ADMIN_MODEL_KEYS[0]: bad,
                     ADMIN_MODEL_KEYS[1]: "",
+                    ADMIN_MODEL_KEYS[2]: "",
                 },
                 actor="admin",
             )
@@ -402,24 +442,71 @@ def test_concurrent_debug_requests_keep_traces_and_token_runs_separate():
     asyncio.run(run())
 
 
-def test_slow_debug_delivery_does_not_use_model_timeout_budget():
+def test_no_debug_messages_are_sent_before_both_models_finish():
     async def run():
         plugin, event = admin_plugin()
-        send = event.send
+        replies = [response(REVIEW, 40, 10), response()]
 
-        async def slow(message):
-            if "请求" in message["text"].partition("\n")[0]:
-                await asyncio.sleep(0.25)
-            await send(message)
+        async def generate(**kwargs):
+            assert not event.sent
+            return replies.pop(0)
 
-        event.send = slow
-        original = plugin._bounded_config_int
-        plugin._bounded_config_int = lambda key, *args: (
-            0.2 if key == "command_analysis_timeout_seconds" else original(key, *args)
-        )
+        plugin.context.llm_generate.side_effect = generate
         await command(plugin, event)
         steps = trace_steps(event)
         assert steps["解卦响应"]["completion_text"] == ANALYSIS
         assert steps["调试汇总"]["已知总 Token"] == 170
+        assert len(event.sent) == 1
+        plugin._send_reply_payload.assert_not_awaited()
+        plugin._send_caster_reply.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["none", "render", "forward"])
+def test_chart_is_in_same_forward_and_kept_until_delivery_then_cleaned(tmp_path, failure):
+    async def run():
+        plugin, event = admin_plugin()
+        image_path = tmp_path / "debug-chart.png"
+
+        def render(*args, **kwargs):
+            if failure == "render":
+                raise OSError("render failed")
+            image_path.write_bytes(b"test image bytes")
+            return image_path
+
+        plugin.renderer = SimpleNamespace(render=render)
+        plugin._render_and_send_chart = LiuyaoPlugin._render_and_send_chart.__get__(plugin)
+        send = event.send
+        forwards = []
+
+        async def deliver(message):
+            assert "image" not in message
+            if "chain" in message:
+                forwards.append(message)
+                assert not event.sent
+                images = [
+                    part["image"]
+                    for node in message["chain"][0]["nodes"]
+                    for part in node["content"]
+                    if "image" in part
+                ]
+                assert images == ([] if failure == "render" else [str(image_path.absolute())])
+                assert image_path.exists() is (failure != "render")
+                if failure == "forward":
+                    raise OSError("forward failed")
+            await send(message)
+
+        event.send = deliver
+        await command(plugin, event)
+        assert len(forwards) == 1 and len(event.sent) == 1
+        assert not image_path.exists()
+        plugin._send_reply_payload.assert_not_awaited()
+        plugin._send_caster_reply.assert_not_awaited()
+        if failure != "forward":
+            steps = trace_steps(event)
+            assert steps["调试汇总"]["已知总 Token"] == 170
+            expected = "生成或发送失败" if failure == "render" else "已加入调试报告"
+            assert expected in steps["输出与发图"]["卦图状态"]
 
     asyncio.run(run())

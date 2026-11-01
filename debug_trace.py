@@ -22,7 +22,8 @@ class DebugTrace:
         self.started = perf_counter()
         self.sequence = 0
         self.calls = []
-        self.delivery_failures = 0
+        self.steps = []
+        self.images = []
         self.run_id = ""
 
     async def step(self, title, data):
@@ -32,19 +33,83 @@ class DebugTrace:
             if isinstance(data, str)
             else json.dumps(data, ensure_ascii=False, indent=2, default=str)
         )
-        chunks = [body[i : i + 1500] for i in range(0, len(body), 1500)] or ["（空）"]
-        for index, chunk in enumerate(chunks, 1):
-            heading = f"【六爻调试 {self.id} · {self.sequence:02d} · {title}】"
-            if len(chunks) > 1:
-                heading += f"（{index}/{len(chunks)}）"
-            try:
-                await asyncio.wait_for(
-                    self.event.send(self.event.plain_result(f"{heading}\n{chunk}")), timeout=15
+        heading = f"【六爻调试 {self.id} · {self.sequence:02d} · {title}】"
+        self.steps.append((title, f"{heading}\n{body}"))
+
+    def _forward_sections(self):
+        groups = {}
+        for title, text in self.steps:
+            if title == "调试汇总":
+                continue
+            if title.startswith("预审"):
+                group = "预审"
+            elif title in {"随机起卦请求", "排盘结果"}:
+                group = "排盘"
+            elif title in {"解卦请求", "解卦响应", "解卦调用异常", "解卦处理失败"}:
+                group = "解卦"
+            elif title in {"权限与群开关", "问题与执行设置"}:
+                group = "输入与设置"
+            else:
+                group = "结果与状态"
+            groups.setdefault(group, []).append(text)
+        return [("汇总", self.steps[-1][1])] + [
+            (group, "\n\n".join(items)) for group, items in groups.items()
+        ]
+
+    async def _send_forward(self, fallback):
+        try:
+            from astrbot.api import message_components as Comp
+
+            get_self_id = getattr(self.event, "get_self_id", None)
+            bot_id = str(
+                (get_self_id() if callable(get_self_id) else "")
+                or getattr(getattr(self.event, "message_obj", None), "self_id", "")
+                or self.event.get_sender_id()
+            )
+            nodes = []
+            for group, text in self._forward_sections():
+                chunks = [text[i : i + 3000] for i in range(0, len(text), 3000)]
+                for index, chunk in enumerate(chunks, 1):
+                    suffix = f" {index}/{len(chunks)}" if len(chunks) > 1 else ""
+                    nodes.append(
+                        Comp.Node(
+                            uin=bot_id,
+                            name=f"六爻调试 · {group}{suffix}",
+                            content=[Comp.Plain(chunk)],
+                        )
+                    )
+            if self.images:
+                nodes.append(
+                    Comp.Node(
+                        uin=bot_id,
+                        name="六爻调试 · 卦图",
+                        content=[
+                            Comp.Image.fromFileSystem(str(path.absolute())) for path in self.images
+                        ],
+                    )
                 )
-            except Exception as exc:
-                self.delivery_failures += len(chunks) - index + 1
-                logger.warning("liuyao：调试消息发送失败：%s", type(exc).__name__)
-                break
+            # One Nodes component is essential: separate Node components send separate forwards.
+            await asyncio.wait_for(
+                self.event.send(self.event.chain_result([Comp.Nodes(nodes)])), timeout=30
+            )
+        except Exception as exc:
+            logger.warning("liuyao：调试合并转发失败：%s", type(exc).__name__)
+            await asyncio.wait_for(
+                self.event.send(
+                    self.event.plain_result(
+                        f"六爻调试 {self.id}：合并转发发送失败（{type(exc).__name__}）。\n"
+                        f"{fallback}"
+                    )
+                ),
+                timeout=15,
+            )
+        finally:
+            for path in self.images:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("liuyao：清理调试卦图失败：%s", type(exc).__name__)
+            self.images.clear()
 
     async def error(self, title, exc):
         # Provider exceptions may include credentials or whole HTTP requests.
@@ -67,10 +132,19 @@ class DebugTrace:
 
     async def finish(self, outcome, *, storage_warning=False):
         totals = summarize([{"calls": self.calls, "kind": "debug"}])
+        output = next(
+            (
+                json.loads(body.partition("\n")[2])
+                for title, body in reversed(self.steps)
+                if title == "输出与发图"
+            ),
+            {},
+        )
         await self.step(
             "调试汇总",
             {
                 "状态": outcome,
+                "结果": output.get("待发送正文", "未生成解卦正文，请查看阶段状态"),
                 "run_id": self.run_id,
                 "总耗时秒": round(perf_counter() - self.started, 3),
                 "模型调用次数": totals["calls"],
@@ -79,12 +153,24 @@ class DebugTrace:
                 "已知缓存输入 Token": totals["cached_tokens"],
                 "已知总 Token": totals["total_tokens"],
                 "总量未知调用次数": totals["unknown_calls"],
+                "逐次调用": [
+                    {
+                        key: call.get(key)
+                        for key in ("stage", "provider", "status", "elapsed_ms", "usage")
+                    }
+                    for call in self.calls
+                ],
                 "说明": "仅累计供应商返回的用量，未知不代表 0；缓存已包含在输入中。",
                 "每日额度": "调试不扣每日额度或赠额",
                 "数据保存": "保留调试 Token 账本，不覆盖最近一卦或保存普通卦例",
                 "Token 保存异常": storage_warning,
-                "调试消息发送失败段数": self.delivery_failures,
             },
+        )
+        await self._send_forward(
+            f"{outcome}\n模型调用 {totals['calls']} 次，已知 Token {totals['total_tokens']}，"
+            f"用量未知 {totals['unknown_calls']} 次。\n"
+            f"记录：{self.run_id or '未开始调用'}\n"
+            f"{str(output.get('待发送正文', ''))[:500]}"
         )
 
 
@@ -95,7 +181,7 @@ class DebugMixin:
         if error := await self._user_access_error(event):
             return error
         if not question.strip():
-            return "用法：/六爻test 问题\n逐步返回调用参数、提示词、模型正文和 Token 用量。"
+            return "用法：/六爻test 问题\n结束后以一条合并转发返回结果、调用详情和 Token 用量。"
         trace = DebugTrace(event)
         outcome = "流程完成，请查看各阶段结果"
         try:

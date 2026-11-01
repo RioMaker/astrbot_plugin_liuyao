@@ -352,11 +352,7 @@ class FeedbackReviewMixin:
             return reply
 
     async def _review_case_feedback(self, event, case, feedback, *, answer="") -> dict[str, Any]:
-        provider = await self.context.get_current_chat_provider_id(
-            umo=str(getattr(event, "unified_msg_origin", "") or "")
-        )
-        if not provider:
-            raise RuntimeError("当前会话没有可用模型")
+        provider = await self._analysis_provider_id(event, "feedback_review_provider_id")
         session = copy.deepcopy(case.get("feedback_review") or {})
         if not session or session.get("version") != 1:
             cast = case.get("cast") if isinstance(case.get("cast"), dict) else {}

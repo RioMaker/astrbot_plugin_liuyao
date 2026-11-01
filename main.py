@@ -82,7 +82,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.31.0"
+PLUGIN_VERSION = "0.32.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -835,8 +835,9 @@ class LiuyaoPlugin(
         comment_title: str,
         enabled_key: str,
         source: str,
+        trace=None,
     ) -> str:
-        """Render one chart and actively send it for commands or Agent tools."""
+        """Render a chart for direct delivery or the buffered administrator report."""
         if source != "指令" and not bool(self._config_get(enabled_key, True)):
             logger.warning(
                 "liuyao：%s 排盘图发送已由配置关闭（%s=false）",
@@ -872,6 +873,10 @@ class LiuyaoPlugin(
             )
             if not image_path.is_file() or image_path.stat().st_size <= 0:
                 raise ChartRenderError("渲染器没有生成有效 PNG 文件")
+            if trace is not None:
+                trace.images.append(image_path)
+                image_path = None  # The report owns the file until the forward is sent.
+                return "已加入调试报告"
             await event.send(event.image_result(str(image_path.absolute())))
             logger.info(
                 "liuyao：%s 排盘图发送成功（%d bytes）",
@@ -1057,8 +1062,9 @@ class LiuyaoPlugin(
                 )
             else:
                 progress_text = "已收到，正在为你起卦并解读；本次已预留 1 次今日 AI 解读额度。"
-            progress_text += "\n" + await self._ai_quota_brief(event)
-            await self._send_caster_reply(event, sender_id, caster_name, progress_text)
+            if trace is None:
+                progress_text += "\n" + await self._ai_quota_brief(event)
+                await self._send_caster_reply(event, sender_id, caster_name, progress_text)
 
             review = None
             review_error = ""
@@ -1237,7 +1243,11 @@ class LiuyaoPlugin(
                     if trace is not None:
                         await trace.error("解卦处理失败", exc)
                     logger.warning("liuyao：卦象解读失败：%r", exc)
-                    analysis = "AI 解读暂时失败，请稍后再试；本次卦图已发送。"
+                    analysis = (
+                        "AI 解读暂时失败；排盘结果见调试报告。"
+                        if trace is not None
+                        else "AI 解读暂时失败，请稍后再试；本次卦图已发送。"
+                    )
 
             if trace is not None:
                 await trace.step(
@@ -1279,9 +1289,10 @@ class LiuyaoPlugin(
                 comment_title="可可子の短评",
                 enabled_key="command_send_chart_image",
                 source="指令",
+                **({"trace": trace} if trace is not None else {}),
             )
             text = refusal or analysis
-            if not chart_status.startswith("已发送"):
+            if not chart_status.startswith(("已发送", "已加入调试报告")):
                 text = f"排盘图未能发送（{chart_status}）。\n" + text
             text = limit_reply(
                 text,
@@ -1302,6 +1313,7 @@ class LiuyaoPlugin(
                         "Token": 0,
                     },
                 )
+                return ""
             if lease.error:
                 # The quota notice was already sent before any slow model work.
                 if not chart_status.startswith("已发送"):

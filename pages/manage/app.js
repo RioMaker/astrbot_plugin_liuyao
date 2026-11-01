@@ -89,8 +89,8 @@ function dailyText(user) {
 function openModels() {
   return openDetail("模型与调试", "管理员专用模型", () => bridge.apiGet("manage/models"), (data) => {
     const body = $("detail-body"), grid = node("div", "", "grid"), controls = {};
-    body.append(node("p", "仅对 AstrBot 管理员的起卦、复解和调试生效。普通用户继续使用插件通用模型；QQ 群主、群管理员身份不触发专用模型。", "help"));
-    for (const [key, label] of [["admin_pre_review_provider_id", "管理员预审模型"], ["admin_interpretation_provider_id", "管理员解卦模型"]]) {
+    body.append(node("p", "仅对 AstrBot 管理员的起卦、复解、反馈审核和调试生效。普通用户继续使用插件通用模型；QQ 群主、群管理员身份不触发专用模型。", "help"));
+    for (const [key, label] of [["admin_pre_review_provider_id", "管理员预审模型"], ["admin_interpretation_provider_id", "管理员解卦模型"], ["admin_feedback_review_provider_id", "管理员反馈审核模型"]]) {
       const options = [["", "继承通用设置（通用留空则跟随系统）"], ...data.providers.map((p) => [p.id, p.model ? `${p.id} · ${p.model}` : p.id])];
       const value = data.values[key];
       if (value && !data.providers.some((p) => p.id === value)) options.push([value, `${value}（已不可用，请重新选择）`]);
@@ -98,7 +98,7 @@ function openModels() {
       grid.append(field(label, controls[key]));
     }
     body.append(grid);
-    body.append(node("p", `通用预审：${data.defaults.command_pre_review_provider_id || "当前会话系统模型"}；通用解卦：${data.defaults.command_interpretation_provider_id || "当前会话系统模型"}。两项独立回退。`, "help"));
+    body.append(node("p", `通用预审：${data.defaults.command_pre_review_provider_id || "当前会话系统模型"}；通用解卦：${data.defaults.command_interpretation_provider_id || "当前会话系统模型"}；通用反馈：${data.defaults.feedback_review_provider_id || "当前会话系统模型"}。三项独立回退，通用模型可在插件配置中修改。`, "help"));
     if (!data.providers.length) body.append(node("p", "暂无可选聊天模型，请先在 AstrBot 模型提供商中配置。", "help"));
     const actions = node("div", "", "actions");
     actions.append(button("保存管理员模型", () => mutate(() => bridge.apiPost("manage/models/save", {
@@ -106,9 +106,9 @@ function openModels() {
       ...Object.fromEntries(Object.entries(controls).map(([key, control]) => [key, control.value])),
     }), "管理员模型已保存，后续调用立即生效", openModels), ""));
     actions.append(button("重新读取", openModels)); body.append(actions);
-    const debug = section("逐步调试");
+    const debug = section("合并转发调试报告");
     debug.append(node("pre", "/六爻test 这个项目能否按期完成", "reading"));
-    debug.append(node("p", "由 AstrBot 管理员在已开启六爻的群内发送。逐步返回实际调用参数、完整提示词、模型正文、预审分类、排盘快照、耗时与 Token 明细；长内容分段显示在当前会话。", "help"));
+    debug.append(node("p", "由 AstrBot 管理员在已开启六爻的群内发送。结束后仅发一条合并转发：先看结论与 Token 汇总，再按预审、排盘、解卦查看完整调用详情；卦图也包含在报告内。", "help"));
     debug.append(node("p", "调试跳过每日额度和赠额扣减，实际 Token 仍记录在统计中并标记为管理员调试。调试卦不覆盖最近一卦，不进入普通卦例库和待反馈列表。", "help"));
     body.append(debug);
   });
