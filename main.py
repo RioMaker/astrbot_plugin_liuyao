@@ -18,17 +18,19 @@ from astrbot.core.star.filter.command import GreedyStr
 if __package__:
     from . import prompts
     from .admin_page import AdminPageMixin
-    from .ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
+    from .ai_daily_quota import AIQuotaLease, AIQuotaStorageError, DailyAIQuotaMixin
     from .case_library import format_case_references, search_cases
     from .case_store import LiuyaoCaseStoreMixin
     from .cast_policy import CastPolicyMixin
     from .corpus import CorpusError, ZhouyiCorpus
+    from .debug_trace import DebugMixin
     from .divination import (
         CastResult,
         infer_intent,
         parse_intent_and_question,
     )
     from .feedback_review import FeedbackReviewMixin
+    from .model_settings import ModelSettingsMixin
     from .reading import ReadingService
     from .renderer import ChartRenderError, LiuyaoImageRenderer
     from .reply_policy import (
@@ -47,17 +49,19 @@ if __package__:
 else:  # pragma: no cover - direct local execution
     import prompts
     from admin_page import AdminPageMixin
-    from ai_daily_quota import AIQuotaStorageError, DailyAIQuotaMixin
+    from ai_daily_quota import AIQuotaLease, AIQuotaStorageError, DailyAIQuotaMixin
     from case_library import format_case_references, search_cases
     from case_store import LiuyaoCaseStoreMixin
     from cast_policy import CastPolicyMixin
     from corpus import CorpusError, ZhouyiCorpus
+    from debug_trace import DebugMixin
     from divination import (
         CastResult,
         infer_intent,
         parse_intent_and_question,
     )
     from feedback_review import FeedbackReviewMixin
+    from model_settings import ModelSettingsMixin
     from reading import ReadingService
     from renderer import ChartRenderError, LiuyaoImageRenderer
     from reply_policy import (
@@ -78,7 +82,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.30.0"
+PLUGIN_VERSION = "0.31.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -125,6 +129,8 @@ def _reply_card_chain(sender_id: str, image_path: str) -> list[Any]:
 )
 class LiuyaoPlugin(
     AdminPageMixin,
+    ModelSettingsMixin,
+    DebugMixin,
     TokenUsageMixin,
     UserManagementMixin,
     DailyAIQuotaMixin,
@@ -222,6 +228,16 @@ class LiuyaoPlugin(
     async def ai_quota_command(self, event: AstrMessageEvent):
         """查询当前 QQ 账号的每日 AI 额度余量及下次恢复时间。"""
         yield event.plain_result(await self._ai_quota_status(event))
+
+    @filter.command("六爻test")
+    async def liuyao_test_command(self, event: AstrMessageEvent, question: GreedyStr):
+        """AstrBot 管理员专用：逐步诊断六爻流程，记录实际 Token，不扣日额度。"""
+        stop = getattr(event, "stop_event", None)
+        if callable(stop):
+            stop()
+        reply = await self._run_debug(event, str(question or ""))
+        if reply:
+            yield event.plain_result(reply)
 
     @filter.command("ping")
     async def llm_ping_command(self, event: AstrMessageEvent):
@@ -960,9 +976,22 @@ class LiuyaoPlugin(
         *,
         original: dict[str, Any] | None = None,
         original_cast: CastResult | None = None,
+        trace=None,
     ) -> str:
         """预审任意输入、随机起卦；合规时解卦，不合规时仅说明边界。"""
+        if trace is not None and not self._is_astrbot_admin(event):
+            return "无权限：/六爻test 仅限 AstrBot 管理员使用。"
         error = await self._group_gate(event, METHOD_LIUYAO)
+        if trace is not None:
+            await trace.step(
+                "权限与群开关",
+                {
+                    "AstrBot 管理员": True,
+                    "群号": str(event.get_group_id() or ""),
+                    "结果": error or "通过",
+                    "Token": 0,
+                },
+            )
         if error:
             return error
         raw_question = self._limited_question(content)
@@ -975,16 +1004,46 @@ class LiuyaoPlugin(
                 question += f"\n本轮追问或补充：{raw_question}"
             intent = self.readings.normalize_intent(original["intent"])
         caster_name, sender_id = self._caster_identity(event)
+        if trace is not None:
+            await trace.step(
+                "问题与执行设置",
+                {
+                    "输入原文": content,
+                    "实际问句": question,
+                    "问题被截断": raw_question != content.strip(),
+                    "初始分类": intent,
+                    "起卦人": sender_id,
+                    "会话": str(getattr(event, "unified_msg_origin", "") or ""),
+                    "预审配置": self._analysis_provider_config(
+                        event, "command_pre_review_provider_id"
+                    ),
+                    "解卦配置": self._analysis_provider_config(
+                        event, "command_interpretation_provider_id"
+                    ),
+                    "解卦字数上限": self._reply_budget(),
+                    "超时秒数": self._bounded_config_int(
+                        "command_analysis_timeout_seconds", 60, 5, 180
+                    ),
+                    "每日额度": "跳过，不扣每日额度或赠额",
+                    "Token": 0,
+                },
+            )
         try:
-            lease = await self._reserve_ai_daily(event)
+            lease = (
+                AIQuotaLease(self, quota_unlimited=True, _finished=True)
+                if trace is not None
+                else await self._reserve_ai_daily(event)
+            )
         except AIQuotaStorageError:
             return "六爻 AI 日额度记录暂不可用，请稍后重试。"
         token_run = self._new_token_run(
             event,
-            kind="reuse" if original is not None else "cast",
+            kind="debug" if trace is not None else "reuse" if original is not None else "cast",
             question=question,
             cast=original_cast,
         )
+        if trace is not None:
+            trace.run_id = token_run["id"]
         try:
             if lease.error:
                 progress_text = lease.error
@@ -1021,18 +1080,17 @@ class LiuyaoPlugin(
                         ),
                         question=question,
                     )
-                    response = await asyncio.wait_for(
-                        self._token_llm(
-                            token_run,
-                            "reuse_review" if original is not None else "pre_review",
-                            chat_provider_id=review_provider,
-                            prompt=review_prompt,
-                        ),
-                        timeout=self._bounded_config_int(
-                            "command_analysis_timeout_seconds", 60, 5, 180
-                        ),
+                    response = await self._call_analysis_model(
+                        event,
+                        token_run,
+                        "reuse_review" if original is not None else "pre_review",
+                        review_provider,
+                        review_prompt,
+                        trace=trace,
                     )
                     raw_review = str(getattr(response, "completion_text", "") or "")
+                    if getattr(response, "role", "") == "err":
+                        raise ValueError("预审模型未返回可用结果")
                     start, end = raw_review.find("{"), raw_review.rfind("}")
                     if start < 0 or end <= start:
                         raise ValueError("预审结果格式无效")
@@ -1048,7 +1106,19 @@ class LiuyaoPlugin(
                     elif not isinstance(reject_value, bool):
                         raise ValueError("预审结果缺少有效的 reject 字段")
                     intent = self._normalize_intent_choice(str(review.get("intent") or ""), intent)
+                    if trace is not None:
+                        await trace.step(
+                            "预审解析与分类",
+                            {
+                                "解析结果": review,
+                                "最终分类": intent,
+                                "继续解卦": not review["reject"],
+                                "本地解析 Token": 0,
+                            },
+                        )
                 except Exception as exc:
+                    if trace is not None:
+                        await trace.error("预审处理失败", exc)
                     logger.warning("liuyao：内容预审失败：%r", exc)
                     review_error = "AI 预审暂不可用，本次仍已起卦；为避免误解读，暂不提供解卦。"
                     if lease and not lease.error:
@@ -1058,6 +1128,23 @@ class LiuyaoPlugin(
                             logger.warning("liuyao：释放未使用的 AI 日额度预约失败")
 
             method = str(original["method"]) if original is not None else "AI 预审分类起卦"
+            if trace is not None:
+                method = "管理员调试起卦"
+                await trace.step(
+                    "随机起卦请求",
+                    {
+                        "调用": "_prepare_cast",
+                        "方式": "随机六爻",
+                        "question": question,
+                        "intent": intent,
+                        "method": method,
+                        "enforce_frequency": False,
+                        "enforce_question": False,
+                        "enforce_duplicate": False,
+                        "persist": False,
+                        "Token": 0,
+                    },
+                )
             cast, cast_error = original_cast, ""
             if original is None:
                 cast, cast_error = await self._prepare_cast(
@@ -1069,12 +1156,26 @@ class LiuyaoPlugin(
                     enforce_frequency=False,
                     enforce_question=False,
                     enforce_duplicate=False,
+                    persist=trace is None,
                 )
             if cast_error:
                 if lease and not lease.error:
                     await lease.release()
                 return cast_error
 
+            if trace is not None:
+                await trace.step(
+                    "排盘结果",
+                    {
+                        "六爻（自下而上）": cast.lines,
+                        "动爻位置": cast.moving_lines,
+                        "本卦序号": cast.primary_number,
+                        "之卦序号": cast.changed_number,
+                        "起卦时间": cast.cast_at,
+                        "排盘快照": cast.chart,
+                        "Token": 0,
+                    },
+                )
             if cast.cast_at is not None:
                 await self._bind_token_cast(token_run, cast)
 
@@ -1115,16 +1216,13 @@ class LiuyaoPlugin(
                         chart=chart_text,
                         max_chars=self._max_chars_instruction(self._reply_budget()),
                     )
-                    response = await asyncio.wait_for(
-                        self._token_llm(
-                            token_run,
-                            "reuse_interpretation" if original is not None else "interpretation",
-                            chat_provider_id=interpretation_provider,
-                            prompt=interpretation_prompt,
-                        ),
-                        timeout=self._bounded_config_int(
-                            "command_analysis_timeout_seconds", 60, 5, 180
-                        ),
+                    response = await self._call_analysis_model(
+                        event,
+                        token_run,
+                        "reuse_interpretation" if original is not None else "interpretation",
+                        interpretation_provider,
+                        interpretation_prompt,
+                        trace=trace,
                     )
                     analysis = self._plain_text(
                         str(getattr(response, "completion_text", "") or "").strip()
@@ -1136,10 +1234,25 @@ class LiuyaoPlugin(
                     else:
                         analysis_recordable = True
                 except Exception as exc:
+                    if trace is not None:
+                        await trace.error("解卦处理失败", exc)
                     logger.warning("liuyao：卦象解读失败：%r", exc)
                     analysis = "AI 解读暂时失败，请稍后再试；本次卦图已发送。"
 
-            if analysis_recordable and cast.cast_at is not None:
+            if trace is not None:
+                await trace.step(
+                    "解卦处理与存储",
+                    {
+                        "有效解读": analysis_recordable,
+                        "解读正文": analysis,
+                        "拒绝或失败说明": refusal,
+                        "保存普通卦例": False,
+                        "覆盖最近一卦": False,
+                        "Token 记录": token_run["id"],
+                        "本地处理 Token": 0,
+                    },
+                )
+            if trace is None and analysis_recordable and cast.cast_at is not None:
                 case_id, _, _ = await self._open_agent_case(
                     event,
                     cast,
@@ -1175,6 +1288,20 @@ class LiuyaoPlugin(
                 self._reply_budget(),
                 trim=bool(self._config_get("command_reply_trim", True)),
             )
+            if trace is not None:
+                await trace.step(
+                    "输出与发图",
+                    {
+                        "卦图状态": chart_status,
+                        "待发送正文": text,
+                        "解卦字数上限": self._reply_budget(),
+                        "图片模式": self._config_get(
+                            "command_reply_image_mode", DEFAULT_IMAGE_MODE
+                        ),
+                        "说明": "调试步骤文本不受解卦字数上限影响。",
+                        "Token": 0,
+                    },
+                )
             if lease.error:
                 # The quota notice was already sent before any slow model work.
                 if not chart_status.startswith("已发送"):
@@ -1438,18 +1565,6 @@ class LiuyaoPlugin(
         limit = min(max(limit, 20), 1000)
         return (value or "").strip()[:limit]
 
-    async def _analysis_provider_id(self, event: AstrMessageEvent, config_key: str) -> str:
-        """Resolve each stage independently; only an empty choice follows the session."""
-        configured = str(self._config_get(config_key, "") or "").strip()
-        if configured:
-            return configured
-        provider_id = await self.context.get_current_chat_provider_id(
-            umo=str(getattr(event, "unified_msg_origin", "") or "")
-        )
-        if not provider_id:
-            raise RuntimeError("当前会话没有可用模型")
-        return provider_id
-
     def _configured_prompt(
         self,
         key: str,
@@ -1608,6 +1723,7 @@ class LiuyaoPlugin(
             r"/(?:六爻|liunyao)(?=\s|$)",
             r"/(?:起卦|divination)\s+(?:六爻|liunyao)(?=\s|$)",
             r"/六爻反馈(?=\s|$)",
+            r"/六爻test(?=\s|$)",
             r"/额度(?=\s|$)",
             r"/ping(?=\s|$)",
         )

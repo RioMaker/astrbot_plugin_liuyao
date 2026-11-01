@@ -403,7 +403,7 @@ def test_web_routes_require_dashboard_identity_and_validate_body(monkeypatch):
         web.error_response = lambda message, status_code=400: (message, status_code)
         monkeypatch.setitem(sys.modules, "astrbot.api.web", web)
         plugin._register_admin_page()
-        assert len(routes) == 9
+        assert len(routes) == 11
         for handler, _methods in routes.values():
             assert (await handler())[1] == 401
         web.request.username = "admin"

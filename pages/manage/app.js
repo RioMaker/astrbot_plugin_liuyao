@@ -86,6 +86,33 @@ function dailyText(user) {
   if (!user.daily_remaining.length) return "待用户查询";
   return user.daily_remaining.join(" / ");
 }
+function openModels() {
+  return openDetail("模型与调试", "管理员专用模型", () => bridge.apiGet("manage/models"), (data) => {
+    const body = $("detail-body"), grid = node("div", "", "grid"), controls = {};
+    body.append(node("p", "仅对 AstrBot 管理员的起卦、复解和调试生效。普通用户继续使用插件通用模型；QQ 群主、群管理员身份不触发专用模型。", "help"));
+    for (const [key, label] of [["admin_pre_review_provider_id", "管理员预审模型"], ["admin_interpretation_provider_id", "管理员解卦模型"]]) {
+      const options = [["", "继承通用设置（通用留空则跟随系统）"], ...data.providers.map((p) => [p.id, p.model ? `${p.id} · ${p.model}` : p.id])];
+      const value = data.values[key];
+      if (value && !data.providers.some((p) => p.id === value)) options.push([value, `${value}（已不可用，请重新选择）`]);
+      controls[key] = select(options, value);
+      grid.append(field(label, controls[key]));
+    }
+    body.append(grid);
+    body.append(node("p", `通用预审：${data.defaults.command_pre_review_provider_id || "当前会话系统模型"}；通用解卦：${data.defaults.command_interpretation_provider_id || "当前会话系统模型"}。两项独立回退。`, "help"));
+    if (!data.providers.length) body.append(node("p", "暂无可选聊天模型，请先在 AstrBot 模型提供商中配置。", "help"));
+    const actions = node("div", "", "actions");
+    actions.append(button("保存管理员模型", () => mutate(() => bridge.apiPost("manage/models/save", {
+      revision: data.revision,
+      ...Object.fromEntries(Object.entries(controls).map(([key, control]) => [key, control.value])),
+    }), "管理员模型已保存，后续调用立即生效", openModels), ""));
+    actions.append(button("重新读取", openModels)); body.append(actions);
+    const debug = section("逐步调试");
+    debug.append(node("pre", "/六爻test 这个项目能否按期完成", "reading"));
+    debug.append(node("p", "由 AstrBot 管理员在已开启六爻的群内发送。逐步返回实际调用参数、完整提示词、模型正文、预审分类、排盘快照、耗时与 Token 明细；长内容分段显示在当前会话。", "help"));
+    debug.append(node("p", "调试跳过每日额度和赠额扣减，实际 Token 仍记录在统计中并标记为管理员调试。调试卦不覆盖最近一卦，不进入普通卦例库和待反馈列表。", "help"));
+    body.append(debug);
+  });
+}
 async function load() {
   const current = ++generation;
   $("refresh").disabled = true;
@@ -307,7 +334,7 @@ function renderUsageRows(items) {
   for (const item of items) {
     const row = node("tr"), cells = Array.from({ length: 7 }, () => node("td")), usage = item.usage;
     if (view === "cases") {
-      const title = item.serial ? `卦例 #${item.serial}` : item.kind === "ping" ? "模型检测" : "未留存卦例";
+      const title = item.serial ? `卦例 #${item.serial}` : item.kind === "debug" ? "管理员调试" : item.kind === "ping" ? "模型检测" : "未留存卦例";
       const question = node("div", item.question || title, "question"); question.title = item.question;
       cells[0].append(node("div", title, "primary"), question, node("small", `${time(item.created_at)} · QQ ${item.caster_id} · 群 ${item.group_id || "无"}`));
       cells[6].append(button("调用明细", () => openUsage(item.id), "link-button"));
@@ -353,6 +380,7 @@ function openUsage(id) {
       const status = { returned: "已返回", error: "调用错误", cancelled: "超时 / 已取消", pending: "待确认" }[call.status] || call.status;
       entry.append(node("div", `${time(call.at)} · ${stageNames[call.stage] || call.stage} · ${status}`, "primary"));
       entry.append(node("div", `模型配置：${call.provider || "未记录"} · 总量 ${tokens?.total_tokens == null ? "未知" : number(tokens.total_tokens)}`));
+      if (call.elapsed_ms != null) entry.append(node("div", `调用耗时：${number(call.elapsed_ms)} ms`));
       entry.append(node("div", `输入 ${tokens?.input_tokens == null ? "未知" : number(tokens.input_tokens)} · 输出 ${tokens?.output_tokens == null ? "未知" : number(tokens.output_tokens)} · 输入中的缓存 ${tokens?.cached_tokens == null ? "未知" : number(tokens.cached_tokens)}`));
       list.append(entry);
     }
@@ -366,6 +394,7 @@ $("detail").addEventListener("close", () => { detailGeneration++; });
 $("tab-users").addEventListener("click", () => switchMode("users"));
 $("tab-cases").addEventListener("click", () => switchMode("cases"));
 $("tab-usage").addEventListener("click", () => switchMode("usage"));
+$("models").addEventListener("click", openModels);
 $("usage-view").addEventListener("change", () => { page = 1; $("search").value = ""; usageSearchPlaceholder(); notice(""); load(); });
 $("usage-reset").addEventListener("click", () => {
   for (const key of ["start", "end", "group", "sender"]) $("usage-" + key).value = "";

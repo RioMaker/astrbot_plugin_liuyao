@@ -63,6 +63,8 @@ class AdminPageMixin:
             ("manage/cases/<case_id>/update", self._admin_change_case, True),
             ("manage/usage", self._page_usage, False),
             ("manage/usage/<usage_id>", self._page_usage_detail, False),
+            ("manage/models", self._page_models, False),
+            ("manage/models/save", self._admin_save_models, True),
         ):
             register(
                 f"/astrbot_plugin_liuyao/{route}",

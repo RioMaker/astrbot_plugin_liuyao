@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from datetime import date, datetime, timedelta
+from time import perf_counter
 from uuid import uuid4
 
 from astrbot.api import logger
@@ -127,7 +128,9 @@ def summarize(runs) -> dict:
             add_call(result, call)
     result["casts"] = len({run["cast_key"] for run in runs if run.get("cast_key")})
     result["tracked"] = bool(runs)
-    result["historical"] = bool(runs) and not any(run.get("kind") == "cast" for run in runs)
+    result["historical"] = bool(runs) and not any(
+        run.get("kind") in {"cast", "debug"} for run in runs
+    )
     return result
 
 
@@ -270,6 +273,8 @@ class TokenUsageMixin:
             cast_at=run["cast_at"],
             lines=cast.lines,
         )
+        if run.get("kind") == "debug":
+            run["cast_key"] = run["id"]
 
     async def _bind_token_cast(self, run, cast):
         self._set_token_cast(run, cast)
@@ -297,7 +302,7 @@ class TokenUsageMixin:
             self._token_storage_warning = True
             logger.warning("liuyao：Token 用量保存失败：%s", type(exc).__name__)
 
-    async def _token_llm(self, run, stage, **kwargs):
+    async def _token_llm(self, run, stage, *, trace=None, **kwargs):
         call = {
             "id": uuid4().hex,
             "stage": stage,
@@ -312,6 +317,9 @@ class TokenUsageMixin:
 
         # Persist intent first: a timeout, cancellation or restart must not look like zero cost.
         await self._token_write(start)
+        if trace is not None:
+            trace.calls.append(call)
+        started = perf_counter()
         try:
             response = await self.context.llm_generate(**kwargs)
         except BaseException as exc:
@@ -322,6 +330,7 @@ class TokenUsageMixin:
             call["status"] = "error" if _get(response, "role") == "err" else "returned"
             return response
         finally:
+            call["elapsed_ms"] = round((perf_counter() - started) * 1000, 2)
 
             def finish(runs):
                 calls = runs[run["id"]]["calls"]

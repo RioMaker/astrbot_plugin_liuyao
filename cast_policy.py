@@ -58,6 +58,7 @@ class CastPolicyMixin:
         confirm_ai_usage=None,
         enforce_question=True,
         enforce_duplicate=True,
+        persist=True,
     ):
         gate = getattr(self, "_user_access_error", None)
         if callable(gate) and (error := await gate(event)):
@@ -69,6 +70,8 @@ class CastPolicyMixin:
         sender = str(event.get_sender_id() or "").strip()
         if not sender:
             return None, "无法识别起卦用户，本次未起卦。"
+        if not persist:
+            return self._new_cast_snapshot(cast, time.time()), ""
         async with self._cast_lock:
             key = "cast_policy:" + sender
             try:
@@ -101,9 +104,7 @@ class CastPolicyMixin:
                         "六爻原卦可继续解读。",
                     )
                 # Generate only after admission; no await between generating and saving the record.
-                cast = cast if cast is not None else cast_instant()
-                cast = replace(cast, cast_at=datetime.fromtimestamp(now, BEIJING), chart=None)
-                cast = replace(cast, chart=build_chart(cast))
+                cast = self._new_cast_snapshot(cast, now)
                 await self.put_kv_data(
                     key,
                     {
@@ -135,6 +136,12 @@ class CastPolicyMixin:
                 logger.exception("liuyao：起卦准入记录处理失败")
                 return None, "起卦记录读取或保存失败，本次未返回新卦，请稍后重试。"
         return cast, ""
+
+    @staticmethod
+    def _new_cast_snapshot(cast, now):
+        cast = cast if cast is not None else cast_instant()
+        cast = replace(cast, cast_at=datetime.fromtimestamp(now, BEIJING), chart=None)
+        return replace(cast, chart=build_chart(cast))
 
     async def _reuse_cast(self, event, *, for_agent=False, question=""):
         error = await self._group_gate(event, "liuyao")

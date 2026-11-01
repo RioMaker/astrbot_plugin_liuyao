@@ -129,6 +129,20 @@
     "_special": "select_provider",
     "hint": "选择 AstrBot 中已配置的聊天模型，用于解卦正文生成；留空使用当前会话由系统配置选择的模型。手动指令、AI 工具起卦和复解共用此设置，与预审模型独立。"
   },
+  "admin_pre_review_provider_id": {
+    "type": "string",
+    "description": "AstrBot 管理员预审模型（留空继承通用设置）",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "仅 AstrBot 管理员起卦、复解和 /六爻test 使用；QQ 群主或群管理员身份不生效。留空继承起卦预审模型，通用设置也留空时跟随当前会话系统模型。也可在用户与卦例管理页的“管理员模型”中保存。"
+  },
+  "admin_interpretation_provider_id": {
+    "type": "string",
+    "description": "AstrBot 管理员解卦模型（留空继承通用设置）",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "仅 AstrBot 管理员起卦、复解和 /六爻test 使用；与管理员预审模型独立。留空继承通用解卦模型，通用设置也留空时跟随当前会话系统模型。"
+  },
   "command_analysis_timeout_seconds": {
     "type": "int",
     "description": "起卦预审和解读超时秒数",
