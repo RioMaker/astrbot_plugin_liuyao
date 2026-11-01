@@ -115,6 +115,20 @@
     "default": "",
     "hint": "留空使用默认提示。额度耗尽时仍会起卦和发图，不会调用 AI。"
   },
+  "command_pre_review_provider_id": {
+    "type": "string",
+    "description": "起卦预审模型（留空跟随系统）",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "选择 AstrBot 中已配置的聊天模型，用于起卦前的内容预审和分类；留空使用当前会话由系统配置选择的模型。手动指令、AI 工具起卦和复解共用此设置，与解卦模型独立。"
+  },
+  "command_interpretation_provider_id": {
+    "type": "string",
+    "description": "解卦模型（留空跟随系统）",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "选择 AstrBot 中已配置的聊天模型，用于解卦正文生成；留空使用当前会话由系统配置选择的模型。手动指令、AI 工具起卦和复解共用此设置，与预审模型独立。"
+  },
   "command_analysis_timeout_seconds": {
     "type": "int",
     "description": "起卦预审和解读超时秒数",

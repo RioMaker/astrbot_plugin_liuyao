@@ -78,7 +78,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.29.0"
+PLUGIN_VERSION = "0.30.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -1003,15 +1003,11 @@ class LiuyaoPlugin(
 
             review = None
             review_error = ""
-            provider = ""
-            context = getattr(self, "context", None)
             if not lease.error:
                 try:
-                    provider = await context.get_current_chat_provider_id(
-                        umo=str(getattr(event, "unified_msg_origin", "") or "")
+                    review_provider = await self._analysis_provider_id(
+                        event, "command_pre_review_provider_id"
                     )
-                    if not provider:
-                        raise RuntimeError("当前会话没有可用模型")
                     await lease.commit()
                     review_prompt = self._configured_prompt(
                         "command_pre_review_prompt",
@@ -1029,7 +1025,7 @@ class LiuyaoPlugin(
                         self._token_llm(
                             token_run,
                             "reuse_review" if original is not None else "pre_review",
-                            chat_provider_id=provider,
+                            chat_provider_id=review_provider,
                             prompt=review_prompt,
                         ),
                         timeout=self._bounded_config_int(
@@ -1102,6 +1098,9 @@ class LiuyaoPlugin(
                     cast, intent=intent, question=question, method=method, for_agent=True
                 )
                 try:
+                    interpretation_provider = await self._analysis_provider_id(
+                        event, "command_interpretation_provider_id"
+                    )
                     interpretation_prompt = self._configured_prompt(
                         "command_interpretation_prompt",
                         prompts.INTERPRETATION_PROMPT,
@@ -1120,7 +1119,7 @@ class LiuyaoPlugin(
                         self._token_llm(
                             token_run,
                             "reuse_interpretation" if original is not None else "interpretation",
-                            chat_provider_id=provider,
+                            chat_provider_id=interpretation_provider,
                             prompt=interpretation_prompt,
                         ),
                         timeout=self._bounded_config_int(
@@ -1438,6 +1437,18 @@ class LiuyaoPlugin(
         limit = int(self._config_get("max_question_length", 200) or 200)
         limit = min(max(limit, 20), 1000)
         return (value or "").strip()[:limit]
+
+    async def _analysis_provider_id(self, event: AstrMessageEvent, config_key: str) -> str:
+        """Resolve each stage independently; only an empty choice follows the session."""
+        configured = str(self._config_get(config_key, "") or "").strip()
+        if configured:
+            return configured
+        provider_id = await self.context.get_current_chat_provider_id(
+            umo=str(getattr(event, "unified_msg_origin", "") or "")
+        )
+        if not provider_id:
+            raise RuntimeError("当前会话没有可用模型")
+        return provider_id
 
     def _configured_prompt(
         self,

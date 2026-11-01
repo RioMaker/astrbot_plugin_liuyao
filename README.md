@@ -2,6 +2,16 @@
 
 面向 QQ 群（OneBot v11 / aiocqhttp）的六爻起卦插件。默认 `/六爻 <内容>` 由 AI 预审、分类、随机起卦并解读；仅保留 `/六爻 开` 和 `/六爻 关` 控制当前群。
 
+## 预审与解卦模型选择（0.30.0）
+
+在 **AstrBot WebUI → 插件 → 六爻起卦 → 配置** 中，可分别选择「起卦预审模型」和「解卦模型」。模型需先在 AstrBot 中配置好，插件使用官方的[模型选择器](https://docs.astrbot.app/dev/star/guides/plugin-config.html)列出已有模型，保存配置并重载插件后生效。
+
+- `command_pre_review_provider_id`：用于起卦内容预审和分类。
+- `command_interpretation_provider_id`：用于生成解卦正文。
+- 两项默认均留空，各自跟随当前会话由 AstrBot 系统配置选择的模型；可分别指定不同模型，也可只指定其中一项，另一项继续跟随系统。清空选择即可恢复系统默认。
+
+`/六爻`、`/起卦 六爻`、AI 工具起卦和复解共用这两项设置。指定模型调用失败时沿用现有失败提示并保留卦图，不自动切换到其他模型。预审与解卦仍合计一次日额度，各次 Token 消耗记录实际调用的模型；反馈审核和 `/ping` 仍使用当前会话模型。
+
 ## Token 用量统计（0.29.0）
 
 更新并重载插件后，打开 **AstrBot WebUI → 插件 → 六爻起卦 → 用户与卦例管理 → Token 统计**。无需新增配置或密钥。
@@ -321,6 +331,8 @@ Agent 工具可显式传 `intent="shefu"` 或 `intent="射覆"`。
 - `ai_quota_feedback_rules`：可在 AstrBot 配置中添加、修改、删除反馈奖励规则；按统计天数和有效反馈数门槛增加每日额度，多条达标规则的加额累加。
 - `ai_quota_whitelist_qq`：忽略 AI 每日额度限制的 QQ 号，多个号码用逗号、空格或换行分隔。
 - `ai_quota_exhausted_message`：额度耗尽后的自定义提示，留空使用默认文案。
+- `command_pre_review_provider_id`：起卦预审和分类模型，从 AstrBot 已配置的聊天模型中选择；默认留空，跟随当前会话的系统模型。
+- `command_interpretation_provider_id`：解卦正文模型，独立选择；默认留空，跟随当前会话的系统模型。
 - `command_analysis_timeout_seconds`：预审和解读模型调用超时，5–180 秒，默认 60 秒。
 - `command_reply_max_chars`：AI 解卦正文的字数上限，0–2000，默认 280；0 表示不限。会写入解卦提示词，超出时按句截断并保留「断语：」。
 - `command_reply_trim`：正文超过字数上限时是否按句截断，默认 `true`。
