@@ -49,6 +49,15 @@ function button(text, callback, cls = "secondary") {
   result.addEventListener("click", callback);
   return result;
 }
+function grantRequestId() {
+  // Unlike randomUUID(), getRandomValues() is also available on HTTP dashboards.
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new Error("当前浏览器无法生成赠送操作编号，请更换浏览器后重试。");
+  }
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
 function fact(label, value) {
   const box = node("div", "", "fact");
   box.append(node("span", label), node("strong", String(value)));
@@ -259,12 +268,18 @@ function openUser(id) {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const value = Number(amount.value);
-      if (!Number.isInteger(value) || value < 1 || value > 10000) return;
-      const signature = JSON.stringify([value, note.value.trim()]);
-      if (!operation || operation.signature !== signature) operation = { signature, id: crypto.randomUUID() };
-      mutate(() => bridge.apiPost(`manage/users/${encodeURIComponent(id)}/grant`, {
-        amount: value, note: note.value.trim(), request_id: operation.id,
-      }), `已赠送 ${value} 次额度`, () => openUser(id));
+      if (!Number.isInteger(value) || value < 1 || value > 10000) {
+        notice("赠送次数须为 1–10000 的整数。", true, true);
+        return;
+      }
+      const noteText = note.value.trim(), signature = JSON.stringify([value, noteText]);
+      mutate(() => {
+        // Generate inside mutate so pre-request errors are visible and controls recover.
+        if (!operation || operation.signature !== signature) operation = { signature, id: grantRequestId() };
+        return bridge.apiPost(`manage/users/${encodeURIComponent(id)}/grant`, {
+          amount: value, note: noteText, request_id: operation.id,
+        });
+      }, `已赠送 ${value} 次额度`, () => openUser(id));
     });
     body.append(grant);
     const settings = section("使用权限与备注"), settingsGrid = node("div", "", "grid");
