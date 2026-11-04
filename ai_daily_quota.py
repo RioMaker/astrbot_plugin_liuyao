@@ -350,7 +350,7 @@ class DailyAIQuotaMixin:
                 if not limit or self._is_ai_quota_whitelisted(event)
                 else str(max(0, limit - used))
             )
-            return f"额度余量：{remaining}{f' +{extra}' if extra else ''} 次（已扣除本次预留）。"
+            return f"额度余量：{remaining}{f' +{extra}' if extra else ''} 次（已扣除处理中预留）。"
         except Exception:
             return "额度余量暂时无法读取，可稍后发送 /额度 查询。"
 

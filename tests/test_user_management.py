@@ -171,7 +171,9 @@ def test_real_command_consumes_gift_and_shows_remaining_suffix():
         )
         event.message_obj.message_id = "gift-message"
         plugin.context.llm_generate.side_effect = [
-            SimpleNamespace(completion_text='{"reject":false,"intent":"事业"}'),
+            SimpleNamespace(
+                completion_text='{"reject":false,"valid_question":true,"intent":"事业"}'
+            ),
             SimpleNamespace(completion_text="断语：按期完成。"),
         ]
         await plugin._dispatch_liuyao(event, QUESTION)

@@ -375,7 +375,9 @@ def test_reply_card_chain_mentions_caster_then_image(tmp_path) -> None:
 # Command path integration
 # ----------------------------------------------------------------------
 def _review_json() -> str:
-    return json.dumps({"reject": False, "reason": "可以分类", "intent": "事业"})
+    return json.dumps(
+        {"reject": False, "valid_question": True, "reason": "可以分类", "intent": "事业"}
+    )
 
 
 @pytest.mark.parametrize("via_tool", [False, True])

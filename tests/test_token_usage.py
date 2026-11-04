@@ -119,7 +119,7 @@ def test_cast_tracks_review_interpretation_reuse_and_feedback_without_overwritin
     async def run():
         plugin, event = prepare()
         plugin.context.llm_generate.side_effect = [
-            response('{"reject":false,"intent":"事业"}', 40, 10),
+            response('{"reject":false,"valid_question":true,"intent":"事业"}', 40, 10),
             response(),
         ]
         await plugin._dispatch_liuyao(event, QUESTION)
@@ -129,7 +129,7 @@ def test_cast_tracks_review_interpretation_reuse_and_feedback_without_overwritin
         assert page["items"][0]["token_usage"]["total_tokens"] == 170
         original = copy.deepcopy(case)
         plugin.context.llm_generate.side_effect = [
-            response('{"reject":false,"intent":"事业"}', 40, 10),
+            response('{"reject":false,"valid_question":true,"intent":"事业"}', 40, 10),
             response(),
         ]
         event.message_obj.message_id = "reuse"
@@ -174,7 +174,9 @@ def test_cast_tracks_review_interpretation_reuse_and_feedback_without_overwritin
 def test_rejected_reviews_are_counted_even_without_archived_case(library):
     async def run():
         plugin, event = prepare(library=library)
-        plugin.context.llm_generate.side_effect = [response('{"reject":true,"intent":"综合"}')]
+        plugin.context.llm_generate.side_effect = [
+            response('{"reject":true,"valid_question":true,"intent":"综合"}')
+        ]
         await plugin._dispatch_liuyao(event, QUESTION)
         data = await plugin._page_usage(query={})
         assert data["summary"]["casts"] == 1
@@ -189,7 +191,7 @@ def test_disabled_library_still_links_reuse_and_zero_ai_casts_are_distinct_from_
     async def run():
         plugin, event = prepare(library=False, limit=1)
         plugin.context.llm_generate.side_effect = [
-            response('{"reject":false,"intent":"事业"}'),
+            response('{"reject":false,"valid_question":true,"intent":"事业"}'),
             response(),
         ]
         await plugin._dispatch_liuyao(event, QUESTION)

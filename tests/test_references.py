@@ -119,7 +119,9 @@ def test_explicit_concrete_intent_is_preserved():
     from test_agent_analysis import ANALYSIS, prepare
 
     assert parse_intent_and_question("出行 明日暴雨会影响出差吗")[0] == "travel"
-    plugin, event = prepare(replies=['{"reject":false,"intent":"出行"}', ANALYSIS])
+    plugin, event = prepare(
+        replies=['{"reject":false,"valid_question":true,"intent":"出行"}', ANALYSIS]
+    )
     result = asyncio.run(plugin.cast_liuyao_tool(event, question="出行 明日暴雨会影响出差吗"))
     prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]
     assert "# 六爻分类参考：出行" in prompt
@@ -209,7 +211,9 @@ def test_agent_weather_image_reference_and_case_roundtrip(tmp_path):
 def test_weather_missing_scope_and_reference_still_returns_cast(tmp_path):
     from test_agent_analysis import ANALYSIS, prepare
 
-    plugin, event = prepare(replies=['{"reject":false,"intent":"天气"}', ANALYSIS])
+    plugin, event = prepare(
+        replies=['{"reject":false,"valid_question":true,"intent":"天气"}', ANALYSIS]
+    )
     plugin.readings.references = ReferenceLibrary(tmp_path, plugin.readings.directions)
     result = asyncio.run(plugin.cast_liuyao_tool(event, question="明天是否下雨"))
     prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]
@@ -254,7 +258,9 @@ def test_weather_command_success_is_image_only(tmp_path):
 def test_each_agent_direction_returns_its_document(intent):
     from test_agent_analysis import ANALYSIS, prepare
 
-    plugin, event = prepare(replies=[json.dumps({"reject": False, "intent": intent}), ANALYSIS])
+    plugin, event = prepare(
+        replies=[json.dumps({"reject": False, "valid_question": True, "intent": intent}), ANALYSIS]
+    )
     result = asyncio.run(plugin.cast_liuyao_tool(event, question="这个事项如何推进"))
     label = plugin.readings.directions[intent]["label"]
     prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]

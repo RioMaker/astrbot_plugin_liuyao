@@ -128,7 +128,9 @@ def test_manual_command_still_runs_ai_review_and_interpretation_when_tools_disab
             get_current_chat_provider_id=AsyncMock(return_value="local-test-model"),
             llm_generate=AsyncMock(
                 side_effect=[
-                    SimpleNamespace(completion_text='{"reject":false,"intent":"事业"}'),
+                    SimpleNamespace(
+                        completion_text='{"reject":false,"valid_question":true,"intent":"事业"}'
+                    ),
                     SimpleNamespace(completion_text="先落实合同条件。\n断语：条件落实后再推进。"),
                 ]
             ),

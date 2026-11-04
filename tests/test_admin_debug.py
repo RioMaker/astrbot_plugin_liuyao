@@ -18,7 +18,7 @@ from model_settings import ADMIN_MODEL_KEYS
 from token_usage import TOKEN_USAGE_KEY
 from user_management import ManagementError
 
-REVIEW = '{"reject":false,"intent":"事业"}'
+REVIEW = '{"reject":false,"valid_question":true,"intent":"事业"}'
 
 
 @pytest.fixture(autouse=True)
@@ -140,7 +140,7 @@ def test_administrator_overrides_and_independent_fallback_for_normal_cast(
 def test_debug_emits_actual_requests_results_usage_and_preserves_production_data():
     async def run():
         plugin, event = admin_plugin()
-        await plugin.cast_liuyao_tool(event, question="普通起卦")
+        await plugin.cast_liuyao_tool(event, question=QUESTION)
         previous = copy.deepcopy(plugin._test_store)
         plugin.context.llm_generate.reset_mock()
         plugin.context.llm_generate.side_effect = [response(REVIEW, 40, 10), response()]
@@ -186,7 +186,9 @@ def test_debug_emits_actual_requests_results_usage_and_preserves_production_data
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("review", ['{"reject":true,"intent":"综合"}', "invalid JSON"])
+@pytest.mark.parametrize(
+    "review", ['{"reject":true,"valid_question":true,"intent":"综合"}', "invalid JSON"]
+)
 def test_rejected_or_malformed_review_reports_usage_and_skips_interpretation(review):
     async def run():
         plugin, event = admin_plugin()

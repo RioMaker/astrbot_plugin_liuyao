@@ -27,7 +27,7 @@ def prepare(*, replies=None, limit=0, library=True):
                 for value in (
                     replies
                     if replies is not None
-                    else ['{"reject":false,"intent":"事业"}', ANALYSIS]
+                    else ['{"reject":false,"valid_question":true,"intent":"事业"}', ANALYSIS]
                 )
             ]
         ),
@@ -81,7 +81,7 @@ def test_tool_and_command_use_identical_models_prompts_delivery_and_archive(monk
 @pytest.mark.parametrize(
     "review",
     [
-        '{"reject":true,"reason":"伤害他人","intent":"综合"}',
+        '{"reject":true,"valid_question":true,"reason":"伤害他人","intent":"综合"}',
         "invalid review",
     ],
 )
@@ -127,7 +127,9 @@ def test_reuse_interprets_inside_plugin_keeps_snapshot_and_original_prediction()
         original = copy.deepcopy(plugin._test_store["cast_policy:20002"])
         old_cases = copy.deepcopy(plugin._test_store["liuyao_case_library"])
         plugin.context.llm_generate.side_effect = [
-            SimpleNamespace(completion_text='{"reject":false,"intent":"事业"}'),
+            SimpleNamespace(
+                completion_text='{"reject":false,"valid_question":true,"intent":"事业"}'
+            ),
             SimpleNamespace(completion_text="等待合同。\n断语：先核对条款。"),
         ]
         event.message_obj.message_id = "follow-up"
@@ -199,7 +201,9 @@ def test_reuse_can_archive_first_successful_interpretation_after_review_failure(
         original = copy.deepcopy(plugin._test_store["cast_policy:20002"])
         assert "liuyao_case_library" not in plugin._test_store
         plugin.context.llm_generate.side_effect = [
-            SimpleNamespace(completion_text='{"reject":false,"intent":"事业"}'),
+            SimpleNamespace(
+                completion_text='{"reject":false,"valid_question":true,"intent":"事业"}'
+            ),
             SimpleNamespace(completion_text=ANALYSIS),
         ]
         event.message_obj.message_id = "retry"

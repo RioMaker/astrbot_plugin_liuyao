@@ -13,7 +13,7 @@ from model_settings import MODEL_OVERRIDES
 
 REVIEW_KEY = "command_pre_review_provider_id"
 INTERPRETATION_KEY = "command_interpretation_provider_id"
-REVIEW = '{"reject":false,"intent":"事业"}'
+REVIEW = '{"reject":false,"valid_question":true,"intent":"事业"}'
 
 
 def test_model_selectors_default_to_system_provider():
@@ -133,7 +133,7 @@ def test_selected_provider_failure_keeps_chart_without_switching_models(stage, f
             "预审暂不可用" in plugin._send_reply_payload.call_args.args[3]
         )
         assert "liuyao_case_library" not in plugin._test_store
-        assert used_count(plugin) == 1
+        assert used_count(plugin) == 0
 
     asyncio.run(run())
 
@@ -148,7 +148,7 @@ def test_missing_system_model_does_not_borrow_the_other_stage_model(review_model
         plugin.context.get_current_chat_provider_id.return_value = ""
         await plugin.cast_liuyao_tool(event, question=QUESTION)
         assert plugin.context.llm_generate.await_count == (1 if review_model else 0)
-        assert used_count(plugin) == (1 if review_model else 0)
+        assert used_count(plugin) == 0
         plugin._render_and_send_chart.assert_awaited_once()
         assert "liuyao_case_library" not in plugin._test_store
 
@@ -157,7 +157,9 @@ def test_missing_system_model_does_not_borrow_the_other_stage_model(review_model
 
 def test_review_rejection_never_resolves_or_calls_default_interpretation_model():
     async def run():
-        plugin, event = prepare(limit=1, replies=['{"reject":true,"intent":"综合"}'])
+        plugin, event = prepare(
+            limit=1, replies=['{"reject":true,"valid_question":true,"intent":"综合"}']
+        )
         plugin.config[REVIEW_KEY] = "review-model"
         await plugin.cast_liuyao_tool(event, question=QUESTION)
         plugin.context.get_current_chat_provider_id.assert_not_awaited()
