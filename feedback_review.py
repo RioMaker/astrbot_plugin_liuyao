@@ -145,7 +145,7 @@ class FeedbackReviewMixin:
                 ):
                     return ""
                 return fallback + "\n卦图暂不可用，请稍后重试。"
-            listing = re.fullmatch(r"列表(?:\s+(\d{1,6}))?", text)
+            listing = re.fullmatch(r"列表(?:\s*(\d{1,6}))?", text)
             if text.startswith("列表") and listing is None:
                 return await self._feedback_notice(event, "翻页格式：/六爻反馈 列表 2")
             pending = await self._pending_feedback_cases(event)

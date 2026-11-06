@@ -27,6 +27,7 @@ class _Filter:
     EventMessageType = types.SimpleNamespace(GROUP_MESSAGE="group")
     event_message_type = staticmethod(_identity_decorator)
     command = staticmethod(_identity_decorator)
+    regex = staticmethod(_identity_decorator)
     llm_tool = staticmethod(_identity_decorator)
     on_agent_done = staticmethod(_identity_decorator)
     on_llm_request = staticmethod(_identity_decorator)

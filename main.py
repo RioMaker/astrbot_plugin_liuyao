@@ -84,13 +84,20 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.33.1"
+PLUGIN_VERSION = "0.33.2"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
 LEGACY_SWITCHES_KEY = "group_switches"
 METHOD_LIUYAO = "liuyao"
 METHOD_LABELS = {METHOD_LIUYAO: "六爻"}
+# Match longer command names first so feedback/debug never become a new cast.
+COMMAND_INPUT_RE = re.compile(
+    r"^/?(?P<command>六爻反馈|六爻test|六爻|liunyao|起卦|divination)"
+    r"(?P<content>[\s\S]*)\Z",
+    re.IGNORECASE,
+)
+LIUYAO_METHOD_RE = re.compile(r"^(?:六爻|liunyao)\s*([\s\S]*)\Z", re.IGNORECASE)
 AGENT_ACTION_TOOL_NAMES = frozenset(
     {
         "cast_liuyao",
@@ -183,6 +190,32 @@ class LiuyaoPlugin(
     # ------------------------------------------------------------------
     # 两条等价根指令：自由文本与保留子命令都由插件统一分派。
     # ------------------------------------------------------------------
+    @filter.regex(COMMAND_INPUT_RE, priority=1)
+    async def compact_command(self, event: AstrMessageEvent):
+        """补充指令名与参数紧连的写法，普通带空格指令仍由原 Handler 处理。"""
+        # Regex filters do not require a wake prefix; keep command wake rules here.
+        # AstrBot may already have stripped the configured prefix from message_str.
+        if not getattr(event, "is_at_or_wake_command", False):
+            return
+        match = COMMAND_INPUT_RE.fullmatch(self._message_text(event).strip())
+        if not match:
+            return
+        content = match["content"]
+        if not content or content[0].isspace():
+            return
+        handlers = {
+            "六爻": self.liuyao_command,
+            "liunyao": self.liuyao_command,
+            "起卦": self.divination_command,
+            "divination": self.divination_command,
+            "六爻反馈": self.liuyao_feedback_command,
+            "六爻test": self.liuyao_test_command,
+        }
+        async for reply in handlers[match["command"].lower()](event, content):
+            yield reply
+        # Stop after yielding: creating a reply may replace the event result.
+        event.stop_event()
+
     @filter.command("六爻", alias={"liunyao"})
     async def liuyao_command(
         self,
@@ -204,11 +237,11 @@ class LiuyaoPlugin(
         if error := await self._user_access_error(event):
             yield event.plain_result(error)
             return
-        parts = str(content or "").strip().split(maxsplit=1)
-        if not parts or parts[0].lower() not in {"六爻", "liunyao"}:
+        match = LIUYAO_METHOD_RE.fullmatch(str(content or "").strip())
+        if not match:
             yield event.plain_result("当前仅支持六爻。\n\n" + self._help_text())
             return
-        liuyao_tail = parts[1].strip() if len(parts) == 2 else ""
+        liuyao_tail = match[1].strip()
         reply = await self._dispatch_liuyao(event, liuyao_tail)
         if reply:
             yield event.plain_result(reply)
@@ -1761,16 +1794,12 @@ class LiuyaoPlugin(
         return self._message_text(event).strip()
 
     def _is_plugin_command_message(self, text: str) -> bool:
-        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
-        roots = (
-            r"/(?:六爻|liunyao)(?=\s|$)",
-            r"/(?:起卦|divination)\s+(?:六爻|liunyao)(?=\s|$)",
-            r"/六爻反馈(?=\s|$)",
-            r"/六爻test(?=\s|$)",
-            r"/额度(?=\s|$)",
-            r"/ping(?=\s|$)",
-        )
-        return any(re.match(root, normalized, flags=re.IGNORECASE) for root in roots)
+        normalized = str(text or "").strip()
+        if match := COMMAND_INPUT_RE.fullmatch(normalized):
+            if match["command"].lower() in {"起卦", "divination"}:
+                return bool(LIUYAO_METHOD_RE.fullmatch(match["content"].strip()))
+            return True
+        return bool(re.match(r"^/?(?:额度|ping)(?=\s|$)", normalized, flags=re.IGNORECASE))
 
     def _should_reply_mention_help(self, event: AstrMessageEvent) -> bool:
         group_id = str(event.get_group_id() or "").strip()
@@ -1778,7 +1807,10 @@ class LiuyaoPlugin(
             return False
         if not self._event_mentions_bot(event):
             return False
-        return not self._is_plugin_command_message(self._message_command_text(event))
+        return not (
+            self._is_plugin_command_message(self._message_command_text(event))
+            or self._is_plugin_command_message(self._message_text(event))
+        )
 
     @staticmethod
     def _message_text(event: AstrMessageEvent) -> str:
