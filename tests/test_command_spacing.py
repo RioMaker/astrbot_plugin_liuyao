@@ -226,29 +226,6 @@ def test_unnumbered_numeric_feedback_is_not_reinterpreted_as_case_number():
     asyncio.run(run())
 
 
-@pytest.mark.parametrize(
-    "message,help_expected",
-    [
-        ("/六爻今年能换工作吗", False),
-        ("六爻开", False),
-        ("/起卦六爻今年能换工作吗", False),
-        ("/六爻反馈302", False),
-        ("/六爻test测试问题", False),
-        ("/六爻反馈 列表 2", False),
-        ("/额度", False),
-        ("/ping", False),
-        ("如何使用六爻", True),
-        ("请看/六爻这个指令", True),
-        ("/pingpong", True),
-    ],
-)
-def test_bot_mention_does_not_add_help_to_compact_commands(message, help_expected):
-    plugin = _make_enabled_plugin()
-    plugin.config["mention_help_group_ids"] = "10001"
-    plugin._event_mentions_bot = Mock(return_value=True)
-    assert plugin._should_reply_mention_help(command_event(message)) is help_expected
-
-
 def test_compact_reply_stops_propagation_after_reply_result_is_created():
     async def run():
         plugin = _make_enabled_plugin()

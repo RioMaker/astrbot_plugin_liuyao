@@ -411,11 +411,6 @@ def test_model_settings_roll_back_when_saving_fails():
     asyncio.run(run())
 
 
-def test_debug_command_is_recognized_for_mention_help():
-    plugin, _event = admin_plugin()
-    assert plugin._is_plugin_command_message("/六爻test 测试问题")
-
-
 def test_concurrent_debug_requests_keep_traces_and_token_runs_separate():
     async def run():
         plugin, first = admin_plugin()

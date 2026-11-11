@@ -13,7 +13,7 @@ from main import HELP_TEXT
 from textcard import LiuyaoTextCardRenderer
 
 
-@pytest.mark.parametrize("entry", ["command", "alias", "mention"])
+@pytest.mark.parametrize("entry", ["command", "alias"])
 def test_help_sends_one_image_without_group_gate_model_or_quota(entry):
     async def run():
         plugin = _make_enabled_plugin()
@@ -39,9 +39,6 @@ def test_help_sends_one_image_without_group_gate_model_or_quota(entry):
             replies = [reply async for reply in plugin.liuyao_command(event, "  ")]
         elif entry == "alias":
             replies = [reply async for reply in plugin.divination_command(event, "六爻")]
-        else:
-            plugin._should_reply_mention_help = Mock(return_value=True)
-            replies = [reply async for reply in plugin.collect_shefu_answer(event)]
         assert replies == []
         assert len(paths) == 1 and not paths[0].exists()
         plugin._group_gate.assert_not_awaited()
@@ -97,3 +94,20 @@ def test_help_card_contains_all_commands_and_descriptions_without_clipping(tmp_p
     for line in HELP_TEXT.splitlines():
         for part in line.split("：", 1):
             assert part.replace(" ", "") in combined
+
+
+@pytest.mark.parametrize("reply", [None, "已记录揭晓"])
+def test_group_observer_only_collects_reveals_even_with_legacy_mention_config(reply):
+    async def run():
+        plugin = _make_enabled_plugin()
+        plugin.config["mention_help_group_ids"] = "10001"
+        plugin._user_access_error = AsyncMock(return_value=None)
+        plugin._help_reply = AsyncMock(side_effect=AssertionError("generic help moved"))
+        plugin._collect_shefu_answer = AsyncMock(return_value=reply)
+        event = _Event("member")
+        replies = [item async for item in plugin.collect_shefu_answer(event)]
+        plugin._help_reply.assert_not_awaited()
+        plugin._collect_shefu_answer.assert_awaited_once_with(event)
+        assert replies == ([event.plain_result(reply)] if reply else [])
+
+    asyncio.run(run())
