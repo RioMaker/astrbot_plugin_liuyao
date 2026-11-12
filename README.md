@@ -2,6 +2,15 @@
 
 面向 QQ 群（OneBot v11 / aiocqhttp）的六爻起卦插件。默认 `/六爻 <内容>` 由 AI 预审、分类、随机起卦并解读；仅保留 `/六爻 开` 和 `/六爻 关` 控制当前群。
 
+## 全部卦例导出（0.34.0）
+
+更新并重载插件后，在 **AstrBot WebUI → 插件 → 六爻起卦 → 用户与卦例管理** 点击顶部「导出全部卦例」，即可下载带北京时间戳的 ZIP。插件配置中的「启用六爻卦例库」提示也注明了导出入口。
+
+- `liuyao_case_library.json`：完整保存当前卦例库 KV 原值，包含所有群、用户及状态的卦例，以及反馈、审核上下文、管理员备注、编号高水位和同库统计。保留历史格式和未知字段，不受搜索、分页或筛选影响。
+- `README.md`：说明字段含义、六爻排列和取值、嵌套排盘、反馈审核结构、存储位置、更新与容量淘汰规则。也可直接阅读 [卦例导出说明](docs/CASE_EXPORT.md)。
+
+导出需要登录 AstrBot 后台，使用官方 [Plugin Pages 下载 Bridge](https://docs.astrbot.app/dev/star/guides/plugin-pages.html)，只读取快照，不修改数据、不调用模型，服务器不保留导出文件。空库也能导出；关闭卦例库后仍可导出已有数据。已经删除或淘汰的卦例无法补回，独立存储的用户权限、赠额、每日额度、Token 账本和插件配置不在此包中。当前未提供导入恢复功能。
+
 ## 指令省略空格兼容（0.33.2）
 
 新增正则补充入口，兼容指令名与参数紧连的写法：
@@ -437,7 +446,7 @@ python -m ruff check .
 node --test tests/manage_page.test.cjs
 ```
 
-也可设置环境变量 `LIUYAO_TEST_BROWSER_CHANNEL=chrome` 使用本机 Chrome。测试以受限 iframe 加载实际管理页，覆盖 HTTP/HTTPS 赠送、异常提示、响应丢失重试与防重复提交；Bridge 使用模拟后端，不会修改真实用户额度。
+也可设置环境变量 `LIUYAO_TEST_BROWSER_CHANNEL=chrome` 使用本机 Chrome。测试以受限 iframe 加载实际管理页，覆盖 HTTP/HTTPS 赠送和全库导出、异常提示、响应丢失重试与防重复提交；Bridge 使用模拟后端，不会修改真实用户额度或下载真实卦例。
 
 ## 说明
 

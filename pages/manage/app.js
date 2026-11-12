@@ -43,6 +43,25 @@ function notice(message, error = false, detail = false) {
   box.classList.toggle("error", error);
   box.hidden = !message;
 }
+async function exportCases() {
+  const control = $("export-cases");
+  if (control.disabled) return;
+  control.disabled = true;
+  control.textContent = "正在导出…";
+  notice("正在打包全部已保存卦例及说明文件…");
+  try {
+    if (typeof bridge?.download !== "function") {
+      throw new Error("当前 AstrBot 不支持页面下载，请升级 AstrBot 后重试。");
+    }
+    await bridge.download("manage/export/cases", {});
+    notice("已发起全部卦例下载：ZIP 内含 liuyao_case_library.json 和 README.md，请查看浏览器下载记录。");
+  } catch (error) {
+    notice(`卦例导出失败：${error.message || "请稍后重试"}`, true);
+  } finally {
+    control.disabled = false;
+    control.textContent = "导出全部卦例";
+  }
+}
 function button(text, callback, cls = "secondary") {
   const result = node("button", text, cls);
   result.type = "button";
@@ -410,6 +429,7 @@ $("tab-users").addEventListener("click", () => switchMode("users"));
 $("tab-cases").addEventListener("click", () => switchMode("cases"));
 $("tab-usage").addEventListener("click", () => switchMode("usage"));
 $("models").addEventListener("click", openModels);
+$("export-cases").addEventListener("click", exportCases);
 $("usage-view").addEventListener("change", () => { page = 1; $("search").value = ""; usageSearchPlaceholder(); notice(""); load(); });
 $("usage-reset").addEventListener("click", () => {
   for (const key of ["start", "end", "group", "sender"]) $("usage-" + key).value = "";
@@ -423,6 +443,7 @@ $("next").addEventListener("click", () => { if (page < pages) { page++; load(); 
 try {
   if (!bridge) throw new Error("请在 AstrBot WebUI → 插件 → 六爻起卦 → 用户与卦例管理 中打开此页面。");
   await bridge.ready();
+  $("export-cases").disabled = false;
   await load();
   const data = await bridge.apiGet("manage/cases", { page: 1 });
   $("stat-cases").textContent = data.all_count;

@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
+from datetime import datetime
+
 from astrbot.api import logger
 
 if __package__:
-    from .case_library import normalize_case_store
+    from .case_export import build_case_export
+    from .case_library import normalize_case_store, serialize_case_store
+    from .paipan import BEIJING
     from .token_usage import case_usage_key, overview, summarize
     from .user_management import CASES_KEY, ManagementError, case_revision, require_text
 else:
-    from case_library import normalize_case_store
+    from case_export import build_case_export
+    from case_library import normalize_case_store, serialize_case_store
+    from paipan import BEIJING
     from token_usage import case_usage_key, overview, summarize
     from user_management import CASES_KEY, ManagementError, case_revision, require_text
 
@@ -27,7 +35,7 @@ class AdminPageMixin:
             logger.warning("liuyao：管理页需要支持 astrbot.api.web 的 AstrBot 版本")
             return
 
-        def handler_for(callback, *, post=False):
+        def handler_for(callback, *, post=False, raw_response=False):
             async def handler(**params):
                 if not self._admin_page_active:
                     return error_response("六爻插件已卸载，请重载插件后刷新页面", status_code=503)
@@ -42,7 +50,7 @@ class AdminPageMixin:
                         result = await callback(**params, payload=body, actor=request.username)
                     else:
                         result = await callback(**params, query=request.query)
-                    return json_response(result)
+                    return result if raw_response else json_response(result)
                 except ManagementError as exc:
                     return error_response(str(exc), status_code=exc.status)
                 except Exception as exc:
@@ -72,6 +80,39 @@ class AdminPageMixin:
                 ["POST" if post else "GET"],
                 "六爻用户与卦例管理",
             )
+
+        register(
+            "/astrbot_plugin_liuyao/manage/export/cases",
+            handler_for(self._page_export_cases, raw_response=True),
+            ["GET"],
+            "导出全部六爻卦例及存储说明",
+        )
+
+    async def _page_export_cases(self, *, query):
+        from astrbot.api.web import stream_response
+
+        # Export the stored value itself, including legacy and unknown fields.
+        # Detach it under the writer lock, then release the lock before compression.
+        async with self._case_lock_instance():
+            snapshot = copy.deepcopy(await self.get_kv_data(CASES_KEY, serialize_case_store([])))
+            exported_at = datetime.now(BEIJING)
+        archive = await asyncio.to_thread(build_case_export, snapshot)
+        filename = f"liuyao_cases_{exported_at.strftime('%Y%m%d_%H%M%S')}.zip"
+
+        async def chunks():
+            for offset in range(0, len(archive), 64 * 1024):
+                yield archive[offset : offset + 64 * 1024]
+
+        return stream_response(
+            chunks(),
+            content_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(archive)),
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @staticmethod
     def _page_options(query) -> tuple[str, int]:

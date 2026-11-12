@@ -19,7 +19,7 @@ after(async () => { await browser?.close(); });
 // Isolate the real management page in the same sandbox as AstrBot Plugin Pages.
 // Only the Bridge is replaced; the form, click handlers and DOM updates are real.
 function installBridge() {
-  const state = window.qa = { balance: 0, posts: [], grants: [], failAfterSave: false, block: false };
+  const state = window.qa = { balance: 0, posts: [], grants: [], failAfterSave: false, block: false, downloads: [], downloadError: "", blockDownload: false };
   function user() {
     return {
       id: "20002", name: "测试用户", cast_count: 1, groups: ["10001"],
@@ -35,7 +35,7 @@ function installBridge() {
       if (endpoint === "manage/users") return {
         items: [user()], page: 1, pages: 1, total: 1, stats: { users: 1, casts: 1, banned: 0 },
       };
-      if (endpoint === "manage/cases") return { items: [], all_count: 0 };
+      if (endpoint === "manage/cases") return { items: [], all_count: 0, total: 0, page: 1, pages: 1 };
       throw new Error(`Unexpected endpoint: ${endpoint}`);
     },
     apiPost: async (endpoint, payload) => {
@@ -53,6 +53,12 @@ function installBridge() {
         throw new Error("模拟响应丢失");
       }
       return { saved: true };
+    },
+    download: async (endpoint, params) => {
+      state.downloads.push({ endpoint, params });
+      if (state.blockDownload) await new Promise((resolve) => { state.resumeDownload = resolve; });
+      if (state.downloadError) throw new Error(state.downloadError);
+      return { filename: "liuyao_cases_20261112_090000.zip" };
     },
   };
 }
@@ -85,7 +91,7 @@ async function openPage(t, protocol = "http") {
   const frame = page.frames().find((item) => item.url().endsWith("/index.html"));
   await frame.getByRole("button", { name: "管理用户", exact: true }).click();
   await frame.getByLabel("赠送次数", { exact: true }).waitFor();
-  return { frame, errors };
+  return { page, frame, errors };
 }
 
 async function waitNotice(frame, text, errors) {
@@ -164,5 +170,52 @@ test("rapid repeated submission sends only one request; a later grant has a new 
   const posts = await frame.evaluate(() => qa.posts);
   assert.equal(posts.length, 2);
   assert.notEqual(posts[0].request_id, posts[1].request_id);
+  assert.deepEqual(errors, []);
+});
+
+for (const protocol of ["http", "https"]) {
+  test(`${protocol.toUpperCase()} sandbox: export downloads all cases independently of filters`, async (t) => {
+    const { frame, errors } = await openPage(t, protocol);
+    await frame.getByRole("button", { name: "关闭详情" }).click();
+    await frame.getByRole("button", { name: "卦例管理", exact: true }).click();
+    await frame.locator("#search").fill("仅搜索一个用户");
+    await frame.locator("#state").selectOption("pending");
+    await frame.getByRole("button", { name: "导出全部卦例", exact: true }).click();
+    await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("已发起全部卦例下载"));
+    assert.deepEqual(await frame.evaluate(() => qa.downloads), [{ endpoint: "manage/export/cases", params: {} }]);
+    assert.equal(await frame.locator("#export-cases").isEnabled(), true);
+    assert.deepEqual(errors, []);
+  });
+}
+
+test("export prevents duplicate downloads and permits retry after an error", async (t) => {
+  const { frame, errors } = await openPage(t);
+  await frame.getByRole("button", { name: "关闭详情" }).click();
+  await frame.evaluate(() => {
+    qa.blockDownload = true;
+    qa.downloadError = "模拟下载失败";
+    const control = document.getElementById("export-cases");
+    control.dispatchEvent(new Event("click"));
+    control.dispatchEvent(new Event("click"));
+  });
+  assert.equal(await frame.locator("#export-cases").isEnabled(), false);
+  assert.equal(await frame.evaluate(() => qa.downloads.length), 1);
+  await frame.evaluate(() => { qa.blockDownload = false; qa.resumeDownload(); });
+  await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("模拟下载失败"));
+  assert.equal(await frame.locator("#export-cases").isEnabled(), true);
+  await frame.evaluate(() => { qa.downloadError = ""; });
+  await frame.locator("#export-cases").click();
+  await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("已发起全部卦例下载"));
+  assert.equal(await frame.evaluate(() => qa.downloads.length), 2);
+  assert.deepEqual(errors, []);
+});
+
+test("an older Bridge without download support shows a recoverable error", async (t) => {
+  const { frame, errors } = await openPage(t);
+  await frame.getByRole("button", { name: "关闭详情" }).click();
+  await frame.evaluate(() => { delete window.AstrBotPluginPage.download; });
+  await frame.locator("#export-cases").click();
+  await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("请升级 AstrBot"));
+  assert.equal(await frame.locator("#export-cases").isEnabled(), true);
   assert.deepEqual(errors, []);
 });
