@@ -222,6 +222,38 @@ def test_model_failure_reports_unknown_usage_and_keeps_chart(stage):
     asyncio.run(run())
 
 
+def test_debug_records_administrator_primary_and_shared_backup_failover():
+    async def run():
+        plugin, event = admin_plugin()
+        plugin.config["command_interpretation_backup_provider_id"] = "backup-reading"
+        plugin.context.llm_generate.side_effect = [
+            response(REVIEW, 40, 10),
+            RuntimeError("secret=PRIVATE_KEY"),
+            response(),
+        ]
+        await command(plugin, event)
+        steps = trace_steps(event)
+        assert steps["解卦切换备用模型"]["主模型"] == "admin-reading"
+        assert steps["解卦切换备用模型"]["备用模型"] == "backup-reading"
+        assert steps["解卦请求"]["模型来源"] == "备用解卦模型配置"
+        assert steps["解卦请求"]["request"]["chat_provider_id"] == "backup-reading"
+        summary = steps["调试汇总"]
+        assert summary["模型调用次数"] == 3
+        assert summary["已知总 Token"] == 170
+        assert summary["总量未知调用次数"] == 1
+        assert [call["provider"] for call in summary["逐次调用"]] == [
+            "admin-review",
+            "admin-reading",
+            "backup-reading",
+        ]
+        assert "PRIVATE_KEY" not in json.dumps(event.sent)
+        assert steps["解卦处理与存储"]["有效解读"] is True
+        assert used_count(plugin) == 0
+        assert "liuyao_case_library" not in plugin._test_store
+
+    asyncio.run(run())
+
+
 def test_timeout_and_cancellation_keep_usage_record_and_summary():
     async def run():
         for cancel in (False, True):

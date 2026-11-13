@@ -202,7 +202,9 @@ class DebugMixin:
             )
         return ""
 
-    async def _call_analysis_model(self, event, run, stage, provider_id, prompt, *, trace=None):
+    async def _call_analysis_model(
+        self, event, run, stage, provider_id, prompt, *, trace=None, provider_source=None
+    ):
         timeout = self._bounded_config_int("command_analysis_timeout_seconds", 60, 5, 180)
         label = "预审" if stage in {"pre_review", "reuse_review"} else "解卦"
         if trace is not None:
@@ -212,6 +214,7 @@ class DebugMixin:
                 else "command_interpretation_provider_id"
             )
             _configured, source = self._analysis_provider_config(event, key)
+            source = provider_source or source
             model = "未提供模型元数据"
             getter = getattr(self.context, "get_provider_by_id", None)
             if callable(getter):

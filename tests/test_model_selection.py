@@ -20,7 +20,11 @@ def test_model_selectors_default_to_system_provider():
     schema = json.loads(
         (Path(__file__).resolve().parents[1] / "_conf_schema.json").read_text(encoding="utf-8")
     )
-    for key in (*MODEL_OVERRIDES, *MODEL_OVERRIDES.values()):
+    for key in (
+        *MODEL_OVERRIDES,
+        *MODEL_OVERRIDES.values(),
+        "command_interpretation_backup_provider_id",
+    ):
         assert schema[key]["type"] == "string"
         assert schema[key]["default"] == ""
         assert schema[key]["_special"] == "select_provider"

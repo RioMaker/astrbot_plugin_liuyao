@@ -1,4 +1,4 @@
-"""Administrator model overrides and authenticated settings-page operations."""
+"""Model selection, interpretation failover and authenticated settings operations."""
 
 from __future__ import annotations
 
@@ -49,6 +49,50 @@ class ModelSettingsMixin:
         if not provider_id:
             raise RuntimeError("当前会话没有可用模型")
         return provider_id
+
+    async def _call_interpretation_model(self, event, run, stage, prompt, *, trace=None) -> str:
+        """Try the selected primary, then one distinct configured backup on failure."""
+        backup_id = str(
+            self._config_get("command_interpretation_backup_provider_id", "") or ""
+        ).strip()
+        primary_id = ""
+
+        async def generate(provider_id, *, provider_source=None):
+            response = await self._call_analysis_model(
+                event,
+                run,
+                stage,
+                provider_id,
+                prompt,
+                trace=trace,
+                provider_source=provider_source,
+            )
+            analysis = self._plain_text(str(getattr(response, "completion_text", "") or "").strip())
+            if getattr(response, "role", "") == "err" or analysis in {"", "Output stopped."}:
+                raise ValueError("模型未返回可用解读")
+            return analysis
+
+        try:
+            primary_id = await self._analysis_provider_id(
+                event, "command_interpretation_provider_id"
+            )
+            return await generate(primary_id)
+        except Exception as exc:
+            # CancelledError must propagate; stopping a run must not start another model.
+            if not backup_id or backup_id == primary_id:
+                raise
+            logger.warning("liuyao：主解卦模型失败（%s），切换备用解卦模型", type(exc).__name__)
+            if trace is not None:
+                await trace.step(
+                    "解卦切换备用模型",
+                    {
+                        "主模型": primary_id or "未能取得主模型",
+                        "备用模型": backup_id,
+                        "error_type": type(exc).__name__,
+                        "说明": "使用相同原卦和提示词，仅尝试备用模型一次；成功后合计一次额度。",
+                    },
+                )
+        return await generate(backup_id, provider_source="备用解卦模型配置")
 
     def _model_choices(self):
         getter = getattr(self.context, "get_all_providers", None)

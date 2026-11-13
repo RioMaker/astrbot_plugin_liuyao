@@ -123,6 +123,13 @@
     "_special": "select_provider",
     "hint": "选择 AstrBot 中已配置的聊天模型，用于解卦正文生成；留空使用当前会话由系统配置选择的模型。手动指令、AI 工具起卦和复解共用此设置，与预审模型独立。"
   },
+  "command_interpretation_backup_provider_id": {
+    "type": "string",
+    "description": "备用解卦模型（留空不启用）",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "主解卦模型报错、超时或未返回有效正文时，使用相同原卦和提示词切换到此模型一次；与主模型相同时不重复调用。指令、AI 工具、复解和管理员解卦共用；预审、反馈审核和 /ping 不使用此备用模型。成功后仍只计一次解卦额度，各次 Token 按实际模型记录。"
+  },
   "feedback_review_provider_id": {
     "type": "string",
     "description": "反馈审核模型（留空跟随系统）",
@@ -155,7 +162,7 @@
     "type": "int",
     "description": "起卦预审和解读超时秒数",
     "default": 60,
-    "hint": "允许范围 5–180 秒。超时仍返回卦图和固定提示。"
+    "hint": "允许范围 5–180 秒，每次模型调用独立计时。主解卦超时且配置了备用模型时切换一次；均失败时仍返回卦图和固定提示。"
   },
   "command_reply_max_chars": {
     "type": "int",

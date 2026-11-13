@@ -84,7 +84,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.35.0"
+PLUGIN_VERSION = "0.36.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -1060,6 +1060,9 @@ class LiuyaoPlugin(
                     "解卦配置": self._analysis_provider_config(
                         event, "command_interpretation_provider_id"
                     ),
+                    "备用解卦模型": str(
+                        self._config_get("command_interpretation_backup_provider_id", "") or ""
+                    ).strip(),
                     "解卦字数上限": self._reply_budget(),
                     "超时秒数": self._bounded_config_int(
                         "command_analysis_timeout_seconds", 60, 5, 180
@@ -1259,9 +1262,6 @@ class LiuyaoPlugin(
                     cast, intent=intent, question=question, method=method, for_agent=True
                 )
                 try:
-                    interpretation_provider = await self._analysis_provider_id(
-                        event, "command_interpretation_provider_id"
-                    )
                     interpretation_prompt = self._configured_prompt(
                         "command_interpretation_prompt",
                         prompts.INTERPRETATION_PROMPT,
@@ -1276,28 +1276,17 @@ class LiuyaoPlugin(
                         chart=chart_text,
                         max_chars=self._max_chars_instruction(self._reply_budget()),
                     )
-                    response = await self._call_analysis_model(
+                    analysis = await self._call_interpretation_model(
                         event,
                         token_run,
                         "reuse_interpretation" if original is not None else "interpretation",
-                        interpretation_provider,
                         interpretation_prompt,
                         trace=trace,
                     )
-                    analysis = self._plain_text(
-                        str(getattr(response, "completion_text", "") or "").strip()
-                    )
-                    if getattr(response, "role", "") == "err" or analysis == "Output stopped.":
-                        raise ValueError("模型未返回可用解读")
-                    if not analysis:
-                        analysis = (
-                            "AI 解读未能返回，请稍后再试；本次卦图已保留，不消耗 AI 解卦次数。"
-                        )
-                    else:
-                        # Keep the reservation through both model calls; only a
-                        # usable interpretation consumes daily or gifted quota.
-                        await lease.commit()
-                        analysis_recordable = True
+                    # Keep the reservation through review and any failover; only
+                    # a usable interpretation consumes daily or gifted quota.
+                    await lease.commit()
+                    analysis_recordable = True
                 except Exception as exc:
                     if trace is not None:
                         await trace.error("解卦处理失败", exc)
