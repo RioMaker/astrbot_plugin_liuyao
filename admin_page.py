@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from astrbot.api import logger
 
 if __package__:
     from .case_export import build_case_export
     from .case_library import normalize_case_store, serialize_case_store
+    from .feedback_card import case_cast
     from .paipan import BEIJING
+    from .renderer import ChartRenderError
     from .token_usage import case_usage_key, overview, summarize
     from .user_management import CASES_KEY, ManagementError, case_revision, require_text
 else:
     from case_export import build_case_export
     from case_library import normalize_case_store, serialize_case_store
+    from feedback_card import case_cast
     from paipan import BEIJING
+    from renderer import ChartRenderError
     from token_usage import case_usage_key, overview, summarize
     from user_management import CASES_KEY, ManagementError, case_revision, require_text
 
@@ -68,6 +75,7 @@ class AdminPageMixin:
             ("manage/users/<sender>/update", self._admin_update_user, True),
             ("manage/cases", self._page_cases, False),
             ("manage/cases/<case_id>", self._page_case, False),
+            ("manage/cases/<case_id>/render", self._page_render_case, True),
             ("manage/cases/<case_id>/update", self._admin_change_case, True),
             ("manage/usage", self._page_usage, False),
             ("manage/usage/<usage_id>", self._page_usage_detail, False),
@@ -243,3 +251,42 @@ class AdminPageMixin:
             "token_usage": summarize(runs),
             "usage_id": key,
         }
+
+    async def _page_render_case(self, case_id: str, *, payload, actor) -> dict:
+        # Read the saved facts only; rendering must never create a new cast or analysis.
+        async with self._case_lock_instance():
+            cases = normalize_case_store(await self.get_kv_data(CASES_KEY, {}))
+            case = next((c for c in cases if c["id"] == case_id), None)
+            if case is None:
+                raise ManagementError("卦例不存在或已删除", 404)
+            case = copy.deepcopy(case)
+        renderer = getattr(self, "renderer", None)
+        if renderer is None:
+            raise ManagementError("卦图渲染器不可用，请检查字体配置并重载插件后重试", 503)
+
+        def render_preview():
+            # Own cleanup inside the worker, even if the HTTP request is cancelled.
+            with TemporaryDirectory(prefix="liuyao_preview_") as directory:
+                output = Path(directory) / "chart.png"
+                try:
+                    cast = case_cast(case)
+                    renderer.render(
+                        cast,
+                        caster_name=str(case.get("caster_name") or ""),
+                        caster_id=str(case.get("caster_id") or ""),
+                        group_id=str(case.get("group_id") or ""),
+                        intent_label=str(case.get("intent_label") or ""),
+                        question=str(case.get("question") or ""),
+                        method=str(case.get("method") or ""),
+                        cast_at=cast.cast_at,
+                        output_path=output,
+                    )
+                except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                    raise ManagementError("卦例的六爻或排盘数据不完整，无法生成卦图", 422) from exc
+                image = output.read_bytes()
+                if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ChartRenderError("渲染器没有生成有效 PNG 文件")
+                # JSON travels through the authenticated Bridge; no public file URL.
+                return "data:image/png;base64," + base64.b64encode(image).decode("ascii")
+
+        return {"case_id": case_id, "image_data_url": await asyncio.to_thread(render_preview)}

@@ -20,6 +20,14 @@ after(async () => { await browser?.close(); });
 // Only the Bridge is replaced; the form, click handlers and DOM updates are real.
 function installBridge() {
   const state = window.qa = { balance: 0, posts: [], grants: [], failAfterSave: false, block: false, downloads: [], downloadError: "", blockDownload: false };
+  state.previews = [];
+  state.previewError = "";
+  state.previewImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDAAAAABJRU5ErkJggg==";
+  const cases = [302, 905].map((serial) => ({
+    id: `LY-${serial}`, serial, caster_id: "20002", caster_name: "测试群友", group_id: "10001",
+    created_at: "2026-10-25T09:40:53+08:00", question: "项目能按期完成吗？", feedback: [],
+    cast: { lines: [7, 8, 9, 6, 7, 8], moving_lines: [3, 4], primary_name: "未济", changed_name: "蒙" },
+  }));
   function user() {
     return {
       id: "20002", name: "测试用户", cast_count: 1, groups: ["10001"],
@@ -35,10 +43,18 @@ function installBridge() {
       if (endpoint === "manage/users") return {
         items: [user()], page: 1, pages: 1, total: 1, stats: { users: 1, casts: 1, banned: 0 },
       };
-      if (endpoint === "manage/cases") return { items: [], all_count: 0, total: 0, page: 1, pages: 1 };
+      if (endpoint === "manage/cases") return { items: cases, all_count: cases.length, total: cases.length, page: 1, pages: 1 };
+      const record = cases.find((item) => endpoint === `manage/cases/${item.id}`);
+      if (record) return { case: record, revision: "test" };
       throw new Error(`Unexpected endpoint: ${endpoint}`);
     },
     apiPost: async (endpoint, payload) => {
+      if (endpoint.endsWith("/render")) {
+        state.previews.push({ endpoint, payload });
+        if (state.blockPreview) await new Promise((resolve) => { state.resumePreview = resolve; });
+        if (state.previewError) throw new Error(state.previewError);
+        return { image_data_url: state.previewImage };
+      }
       state.posts.push({ endpoint, ...payload });
       if (state.block) await new Promise((resolve) => { state.resume = resolve; });
       if (endpoint !== "manage/users/20002/grant" || !/^[a-zA-Z0-9-]{16,64}$/.test(payload.request_id)) {
@@ -219,3 +235,72 @@ test("an older Bridge without download support shows a recoverable error", async
   assert.equal(await frame.locator("#export-cases").isEnabled(), true);
   assert.deepEqual(errors, []);
 });
+
+async function openCasePage(t, protocol = "http") {
+  const result = await openPage(t, protocol);
+  await result.frame.getByRole("button", { name: "关闭详情" }).click();
+  await result.frame.getByRole("button", { name: "卦例管理", exact: true }).click();
+  await result.frame.getByRole("button", { name: "查看卦例", exact: true }).first().click();
+  await result.frame.getByRole("button", { name: "渲染卦图并预览", exact: true }).waitFor();
+  return result;
+}
+
+for (const protocol of ["http", "https"]) {
+  test(`${protocol.toUpperCase()} sandbox: case preview renders only on click and supports rerender and original size`, async (t) => {
+    const { frame, errors } = await openCasePage(t, protocol);
+    assert.equal(await frame.evaluate(() => qa.previews.length), 0);
+    await frame.getByRole("button", { name: "渲染卦图并预览", exact: true }).click();
+    await frame.getByRole("img", { name: "卦例 #302 的卦图" }).waitFor();
+    assert.equal(await frame.locator(".chart-preview img").evaluate((img) => img.complete && img.naturalWidth > 0), true);
+    await frame.getByRole("button", { name: "查看原图尺寸", exact: true }).click();
+    assert.equal(await frame.locator(".chart-preview").evaluate((box) => box.classList.contains("original-size")), true);
+    await frame.getByRole("button", { name: "适应宽度", exact: true }).click();
+    await frame.getByRole("button", { name: "重新渲染卦图", exact: true }).click();
+    await frame.getByRole("button", { name: "重新渲染卦图", exact: true }).waitFor();
+    assert.deepEqual(await frame.evaluate(() => qa.previews), Array(2).fill({ endpoint: "manage/cases/LY-302/render", payload: {} }));
+    assert.deepEqual(errors, []);
+  });
+}
+
+test("preview prevents duplicate rendering and recovers from backend and image errors", async (t) => {
+  const { frame, errors } = await openCasePage(t);
+  await frame.evaluate(() => {
+    qa.blockPreview = true;
+    qa.previewError = "卦例不存在或已删除";
+    const control = document.querySelector(".case-chart button");
+    control.dispatchEvent(new Event("click"));
+    control.dispatchEvent(new Event("click"));
+  });
+  assert.equal(await frame.evaluate(() => qa.previews.length), 1);
+  assert.equal(await frame.getByRole("button", { name: "正在渲染…", exact: true }).isEnabled(), false);
+  await frame.evaluate(() => { qa.blockPreview = false; qa.resumePreview(); });
+  await frame.getByText("卦图预览失败：卦例不存在或已删除", { exact: true }).waitFor();
+  assert.equal(await frame.locator(".chart-preview").isVisible(), false);
+  const validImage = await frame.evaluate(() => qa.previewImage);
+  for (const image of ["https://untrusted.test/image.png", "data:image/png;base64,bm90IGEgcG5n"]) {
+    await frame.evaluate((image) => { qa.previewError = ""; qa.previewImage = image; }, image);
+    await frame.getByRole("button", { name: "重试渲染卦图", exact: true }).click();
+    await frame.getByRole("button", { name: "重试渲染卦图", exact: true }).waitFor();
+    assert.equal(await frame.locator(".chart-status.error").isVisible(), true);
+  }
+  await frame.evaluate((image) => { qa.previewImage = image; }, validImage);
+  await frame.getByRole("button", { name: "重试渲染卦图", exact: true }).click();
+  await frame.getByRole("img", { name: "卦例 #302 的卦图" }).waitFor();
+  assert.deepEqual(errors, []);
+});
+
+for (const failure of [false, true]) {
+  test(`late preview ${failure ? "failure" : "success"} cannot change another case detail`, async (t) => {
+    const { frame, errors } = await openCasePage(t);
+    await frame.evaluate((failure) => { qa.blockPreview = true; qa.previewError = failure ? "旧请求失败" : ""; }, failure);
+    await frame.getByRole("button", { name: "渲染卦图并预览", exact: true }).click();
+    await frame.getByRole("button", { name: "关闭详情" }).click();
+    await frame.getByRole("button", { name: "查看卦例", exact: true }).nth(1).click();
+    await frame.getByRole("heading", { name: "卦例 #905", exact: true }).waitFor();
+    await frame.evaluate(async () => { qa.resumePreview(); await new Promise((resolve) => setTimeout(resolve, 50)); });
+    assert.equal(await frame.locator(".chart-preview img").count(), 0);
+    assert.equal(await frame.locator(".chart-status").textContent(), "");
+    assert.equal(await frame.getByRole("button", { name: "渲染卦图并预览", exact: true }).isEnabled(), true);
+    assert.deepEqual(errors, []);
+  });
+}

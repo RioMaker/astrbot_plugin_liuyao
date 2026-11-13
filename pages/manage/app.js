@@ -322,6 +322,70 @@ function openUser(id) {
     }
   });
 }
+function caseChartPreview(id, serial) {
+  const container = node("div", "", "case-chart");
+  const actions = node("div", "", "actions");
+  const status = node("p", "", "help chart-status");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  const preview = node("div", "", "chart-preview");
+  preview.hidden = true;
+  let rendering = false;
+  const current = detailGeneration;
+  const active = () => current === detailGeneration && $("detail").open && container.isConnected;
+  const size = button("查看原图尺寸", () => {
+    const original = preview.classList.toggle("original-size");
+    size.textContent = original ? "适应宽度" : "查看原图尺寸";
+    size.setAttribute("aria-pressed", String(original));
+  });
+  size.hidden = true;
+  size.setAttribute("aria-pressed", "false");
+  const render = button("渲染卦图并预览", async () => {
+    if (rendering || busy || !active()) return;
+    rendering = true;
+    render.disabled = true;
+    render.textContent = "正在渲染…";
+    status.classList.remove("error");
+    status.textContent = "正在根据保存的原卦生成卦图…";
+    preview.hidden = true;
+    size.hidden = true;
+    preview.setAttribute("aria-busy", "true");
+    try {
+      const data = await bridge.apiPost(`manage/cases/${encodeURIComponent(id)}/render`, {});
+      if (!active()) return;
+      if (typeof data?.image_data_url !== "string" || !data.image_data_url.startsWith("data:image/png;base64,")) {
+        throw new Error("未收到有效的卦图，请重试。");
+      }
+      const image = node("img");
+      image.alt = `卦例 #${serial} 的卦图`;
+      image.src = data.image_data_url;
+      await image.decode();
+      if (!active()) return;
+      preview.replaceChildren(image);
+      preview.classList.remove("original-size");
+      preview.hidden = false;
+      size.textContent = "查看原图尺寸";
+      size.setAttribute("aria-pressed", "false");
+      size.hidden = false;
+      status.textContent = "卦图已生成，可切换原图尺寸查看细节。";
+      render.textContent = "重新渲染卦图";
+    } catch (error) {
+      if (!active()) return;
+      status.textContent = `卦图预览失败：${error.message || "请稍后重试"}`;
+      status.classList.add("error");
+      render.textContent = "重试渲染卦图";
+    } finally {
+      rendering = false;
+      if (active()) {
+        render.disabled = busy;
+        preview.setAttribute("aria-busy", "false");
+      }
+    }
+  }, "");
+  actions.append(render, size);
+  container.append(actions, node("p", "按保存的六爻、起卦时间及排盘生成，不调用 AI，不消耗额度。", "help"), status, preview);
+  return container;
+}
 function openCase(id) {
   return openDetail("卦例管理", "卦例详情", () => bridge.apiGet(`manage/cases/${encodeURIComponent(id)}`), ({ case: record, revision, token_usage: usage, usage_id }) => {
     $("detail-title").textContent = `卦例 #${record.serial}`;
@@ -338,6 +402,7 @@ function openCase(id) {
     }
     const chart = section("原卦记录");
     chart.append(node("p", `六爻（初爻至上爻）：${(cast.lines || []).join("、")}；动爻：${(cast.moving_lines || []).join("、") || "无"}`, "help"));
+    chart.append(caseChartPreview(id, record.serial));
     const raw = node("details"); raw.append(node("summary", "展开完整排盘数据"), node("pre", JSON.stringify(cast.chart || cast, null, 2), "reading")); chart.append(raw); body.append(chart);
     const feedback = section("实际反馈");
     if (!(record.feedback || []).length) feedback.append(node("p", "尚未反馈", "help"));
