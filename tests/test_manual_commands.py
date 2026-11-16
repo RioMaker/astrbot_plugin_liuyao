@@ -37,7 +37,17 @@ def records(plugin):
         "正反反,正正反,正正正,反反反,正反反,正正反",
     ],
 )
-@pytest.mark.parametrize("time", ["", "时间=2026-11-15T20:30 ", "时间=2026-11-15 20:30 "])
+@pytest.mark.parametrize(
+    "time",
+    [
+        "",
+        "时间=2026-11-15T20:30 ",
+        "时间=2026-11-15 20:30 ",
+        "时间=2026-11-15t20:30:00 ",
+        "时间=202611152030 ",
+        "时间＝20261115203000 ",
+    ],
+)
 def test_manual_parser_lines_order_time_and_question(values, time):
     now = datetime(2026, 11, 16, 10, 30, tzinfo=BEIJING)
     cast, question, source = parse_manual_request(f"{values} {time}{QUESTION}", now=now)
@@ -57,6 +67,17 @@ def test_manual_parser_lines_order_time_and_question(values, time):
         "789678 时间=2026-11-15T25:00",
         "789678 时间=2026-11-15",
         "789678 时间=1899-11-15T10:00",
+        "789678 时间=202602300830",
+        "789678 时间=202613010830",
+        "789678 时间=202610222400",
+        "789678 时间=202610220860",
+        "789678 时间=20261022083060",
+        "789678 时间=189910220830",
+        "789678 时间=210110220830",
+        "789678 时间=20261022",
+        "789678 时间=20261022083",
+        "789678 时间=2026102208300",
+        "789678 时间=202610220830001",
     ],
 )
 def test_manual_parser_rejects_malformed_cast_or_date(text):
@@ -70,6 +91,24 @@ def test_manual_parser_preserves_multiline_question():
     assert parsed == question
 
 
+@pytest.mark.parametrize(
+    ("time", "expected"),
+    [
+        ("202610220830", datetime(2026, 10, 22, 8, 30, tzinfo=BEIJING)),
+        ("20261022083045", datetime(2026, 10, 22, 8, 30, 45, tzinfo=BEIJING)),
+        ("200002290000", datetime(2000, 2, 29, tzinfo=BEIJING)),
+        ("190001010000", datetime(1900, 1, 1, tzinfo=BEIJING)),
+        ("21001231235959", datetime(2100, 12, 31, 23, 59, 59, tzinfo=BEIJING)),
+    ],
+)
+@pytest.mark.parametrize("question", ["", "【问题】", "【问题】\n补充：保留  两个空格。"])
+def test_compact_time_preserves_date_and_question(time, expected, question):
+    cast, parsed, source = parse_manual_request(f"677667 时间={time} {question}")
+    assert cast.lines == (6, 7, 7, 6, 6, 7)
+    assert cast.cast_at == expected
+    assert source == "specified" and parsed == question
+
+
 def test_manual_question_starting_with_time_is_not_a_date_option():
     _, question, source = parse_manual_request("789678 时间合适吗，是否可以出发？")
     assert question == "时间合适吗，是否可以出发？" and source == "received"
@@ -77,7 +116,8 @@ def test_manual_question_starting_with_time_is_not_a_date_option():
 
 @pytest.mark.parametrize("space", ["", " ", "　"])
 @pytest.mark.parametrize("analyze", [False, True])
-def test_spaced_and_compact_manual_commands_never_randomize(monkeypatch, space, analyze):
+@pytest.mark.parametrize("time", ["2026-11-15T20:30", "202611152030"])
+def test_spaced_and_compact_manual_commands_never_randomize(monkeypatch, space, analyze, time):
     def no_random():
         raise AssertionError("manual cast must not use RNG")
 
@@ -86,7 +126,7 @@ def test_spaced_and_compact_manual_commands_never_randomize(monkeypatch, space, 
     async def run():
         plugin, _ = prepare(limit=1)
         action = "解卦" if analyze else "排盘"
-        text = f"{action} 789678 时间=2026-11-15T20:30 {QUESTION}"
+        text = f"{action} 789678 时间={time} {QUESTION}"
         event = command_event("/六爻" + space + text)
         event.message_obj.message_id = "manual"
         if space:
@@ -104,6 +144,28 @@ def test_spaced_and_compact_manual_commands_never_randomize(monkeypatch, space, 
         assert used_count(plugin) == int(analyze)
         assert plugin.context.llm_generate.await_count == (2 if analyze else 0)
         assert plugin._render_and_send_chart.call_args.args[1].chart == case["cast"]["chart"]
+
+    asyncio.run(run())
+
+
+def test_requested_compact_command_archives_original_time_and_current_call_time():
+    async def run():
+        plugin, _ = prepare()
+        event = command_event("/六爻排盘 677667 时间=202610220830 【问题】")
+        assert await compact(plugin, event) == []
+        case = records(plugin)[0]
+        assert case["cast"]["lines"] == [6, 7, 7, 6, 6, 7]
+        assert case["question"] == "【问题】"
+        assert case["created_at"] == "2026-10-22T08:30:00+08:00"
+        assert case["cast"]["chart"]["calendar"]["cast_at"] == case["created_at"]
+        assert datetime.fromisoformat(case["recorded_at"]) > datetime.fromisoformat(
+            case["created_at"]
+        )
+        listed = (await plugin._page_cases(query={}))["items"][0]
+        assert listed["recorded_at"] == case["recorded_at"]
+        assert listed["created_at"] == case["created_at"]
+        plugin.context.llm_generate.assert_not_awaited()
+        assert used_count(plugin) == 0
 
     asyncio.run(run())
 

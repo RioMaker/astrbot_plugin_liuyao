@@ -180,7 +180,7 @@ async function load() {
 }
 function renderRows(items) {
   const headers = mode === "users" ? ["用户", "起卦 / 最近使用", "赠送余量", "状态", "累计 Token", "操作"]
-    : ["编号 / 起卦时间", "所问与卦象", "用户 / 群", "反馈", "累计 Token", "操作"];
+    : ["编号 / 调用时间", "所问与卦象", "用户 / 群", "反馈", "累计 Token", "操作"];
   const head = node("tr"); headers.forEach((text) => head.append(node("th", text)));
   $("table-head").replaceChildren(head);
   $("table-body").replaceChildren();
@@ -197,7 +197,11 @@ function renderRows(items) {
       cells[5].append(button("管理用户", () => openUser(item.id), "link-button"));
     } else {
       const state = item.feedback_closed ? "closed" : item.feedback_eligible === false ? "unavailable" : "pending";
-      cells[0].append(node("span", `#${item.serial}`, `case-number ${state}`), node("small", time(item.created_at)));
+      cells[0].append(
+        node("span", `#${item.serial}`, `case-number ${state}`),
+        node("small", `调用 ${time(item.recorded_at)}`),
+        node("small", `起卦 ${time(item.created_at)}`),
+      );
       const question = node("div", item.analysis_question || item.question || "未记录问题", "question primary");
       question.title = item.analysis_question || item.question;
       cells[1].append(question, node("small", item.primary_name));
@@ -224,7 +228,7 @@ async function switchMode(next) {
   for (const id of ["usage-summary", "usage-filters", "usage-selected"]) $(id).hidden = mode !== "usage";
   $("search").placeholder = mode === "users" ? "搜索 QQ 号、昵称或群号" : "搜索编号、问题、QQ 号或备注";
   $("table-hint").textContent = mode === "users" ? "每日额度优先使用；赠送额度跨日保留，用尽后自动隐藏 +n。"
-    : "查看原卦与反馈、填写管理备注。删除卦例保留用户、积分、赠送额度与 Token 用量记录。";
+    : "按调用（录入）时间从新到旧排列；旧记录缺少调用时间时按起卦时间排序。删除卦例保留用户、积分、赠送额度与 Token 用量记录。";
   if (mode === "usage") {
     usageSearchPlaceholder();
     $("table-hint").textContent = "北京时间，周一为一周起点。按模型调用开始日期统计；包含预审、解卦、复解、反馈审核和模型检测。缓存 Token 已包含在输入中。仅累计供应商已报告用量，未知不按 0 计算；旧卦仅记录升级后的调用。";
@@ -392,7 +396,7 @@ function openCase(id) {
     $("detail-title").textContent = `卦例 #${record.serial}`;
     const body = $("detail-body"), cast = record.cast || {}, facts = node("div", "", "facts");
     facts.append(fact("本卦 → 变卦", `${cast.primary_name || "—"} → ${cast.changed_name || "—"}`), fact("起卦用户", `${record.caster_name || ""} ${record.caster_id}`), fact("群号", record.group_id));
-    body.append(facts, node("p", `${time(record.created_at)} · ${record.method || ""} · ${record.intent_label || ""}`, "help"));
+    body.append(facts, node("p", `调用时间：${time(record.recorded_at)} · 起卦时间：${time(record.created_at)} · ${record.method || ""} · ${record.intent_label || ""}`, "help"));
     const tokens = section("本卦 Token 消耗");
     tokens.append(fact("累计（含复解与反馈审核）", tokenText(usage, true)));
     if (usage?.tracked) tokens.append(node("p", tokenBreakdown(usage), "help"), button("查看调用明细", () => openUsage(usage_id)));

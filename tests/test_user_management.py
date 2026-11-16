@@ -391,6 +391,94 @@ def test_page_pagination_search_and_filters():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "query",
+    [{}, {"search": "原问题", "state": "pending", "sender": "20002"}],
+)
+def test_case_page_sorts_manual_calls_before_pagination_without_changing_cast_time(query):
+    async def run():
+        plugin = await registered_plugin()
+        cases = [
+            {
+                **legacy_case(),
+                "id": f"LY-{serial}",
+                "serial": serial,
+                "created_at": f"2000-01-{26 - serial:02}T08:30:00+08:00",
+                "recorded_at": f"2026-11-{serial:02}T10:00:00+08:00",
+                "updated_at": "2099-12-31T23:59:00+08:00",
+                "feedback": [],
+            }
+            for serial in range(1, 26)
+        ]
+        plugin._test_store["liuyao_case_library"]["cases"] = cases
+        before = copy.deepcopy(plugin._test_store)
+        first = await plugin._page_cases(query=query)
+        second = await plugin._page_cases(query={**query, "page": "2"})
+        assert first["total"] == 25 and first["pages"] == 2
+        assert [row["serial"] for row in first["items"]] == list(range(25, 5, -1))
+        assert [row["serial"] for row in second["items"]] == list(range(5, 0, -1))
+        assert first["items"][0]["created_at"] == "2000-01-01T08:30:00+08:00"
+        assert first["items"][0]["recorded_at"] == "2026-11-25T10:00:00+08:00"
+        assert before == plugin._test_store
+
+    asyncio.run(run())
+
+
+def test_case_page_recording_order_handles_legacy_dates_offsets_and_ties():
+    async def run():
+        plugin = await registered_plugin()
+        cases = [
+            {**legacy_case(), "id": "legacy", "serial": 1},
+            {
+                **legacy_case(),
+                "id": "manual",
+                "serial": 2,
+                "created_at": "1900-01-01T08:30:00+08:00",
+                "recorded_at": "2026-10-28T05:00:00+00:00",
+            },
+            {
+                **legacy_case(),
+                "id": "tie",
+                "serial": 3,
+                "created_at": "1900-01-02T08:30:00+08:00",
+                "recorded_at": "2026-10-28T13:00:00",
+            },
+            {
+                **legacy_case(),
+                "id": "empty-recording",
+                "serial": 4,
+                "created_at": "2026-10-28T11:00:00",
+                "recorded_at": "",
+            },
+            {
+                **legacy_case(),
+                "id": "invalid-recording",
+                "serial": 5,
+                "created_at": "2026-10-28T10:00:00+08:00",
+                "recorded_at": "invalid",
+            },
+            {
+                **legacy_case(),
+                "id": "unknown-dates",
+                "serial": 6,
+                "created_at": None,
+                "recorded_at": None,
+            },
+        ]
+        plugin._test_store["liuyao_case_library"]["cases"] = cases
+        result = await plugin._page_cases(query={})
+        assert [row["id"] for row in result["items"]] == [
+            "tie",
+            "manual",
+            "legacy",
+            "empty-recording",
+            "invalid-recording",
+            "unknown-dates",
+        ]
+
+    asyncio.run(run())
+
+
 def test_web_routes_require_dashboard_identity_and_validate_body(monkeypatch):
     async def run():
         plugin = await registered_plugin()

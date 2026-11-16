@@ -307,6 +307,27 @@ for (const failure of [false, true]) {
 }
 
 
+test("case list keeps server order and distinguishes call time from historical cast time", async (t) => {
+  const { page, frame, errors } = await openPage(t);
+  await frame.evaluate(() => {
+    qa.cases[0].created_at = "2000-01-01T08:30:00+08:00";
+    qa.cases[0].recorded_at = "2026-11-16T12:30:00+08:00";
+  });
+  await frame.locator("#close-detail").click();
+  await frame.getByRole("button", { name: "卦例管理", exact: true }).click();
+  await frame.getByRole("columnheader", { name: "编号 / 调用时间", exact: true }).waitFor();
+  const first = frame.locator("#table-body tr").first().locator("td").first();
+  assert.match(await first.textContent(), /#302调用 2026\/11\/16 12:30起卦 2000\/01\/01 08:30/);
+  assert.match(await frame.locator("#table-body tr").nth(1).textContent(), /调用 未记录/);
+  assert.match(await frame.locator("#table-hint").textContent(), /按调用（录入）时间从新到旧排列/);
+  if (process.env.LIUYAO_QA_OUTPUT) await page.screenshot({ path: join(process.env.LIUYAO_QA_OUTPUT, "management-time-order.png"), fullPage: true });
+  await frame.getByRole("button", { name: "查看卦例", exact: true }).first().click();
+  await frame.getByRole("heading", { name: "卦例 #302", exact: true }).waitFor();
+  assert.match(await frame.locator("#detail-body").textContent(), /调用时间：2026\/11\/16 12:30 · 起卦时间：2000\/01\/01 08:30/);
+  if (process.env.LIUYAO_QA_OUTPUT) await page.screenshot({ path: join(process.env.LIUYAO_QA_OUTPUT, "management-time-detail.png"), fullPage: true });
+  assert.deepEqual(errors, []);
+});
+
 test("case states and complete reading history remain visible and escaped", async (t) => {
   const { page, frame, errors } = await openPage(t);
   await frame.evaluate(() => {

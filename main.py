@@ -86,7 +86,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.37.0"
+PLUGIN_VERSION = "0.37.1"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -116,7 +116,7 @@ HELP_TEXT = """六爻使用指南
 /六爻排盘 <六爻> [问题]：只排盘并存档；6/7/8/9 自下而上，也支持六组正反（正3反2）。
 /六爻解卦 <六爻> <问题>：按手摇结果排盘并 AI 解卦，成功后计次。
 /六爻解卦 #编号 [问题]：也支持“编号233”；沿用原盘，每次解读追加保存。
-时间=2026-11-15T20:30：可放在六爻结果后；不填按当前北京时间。/六爻 与子指令之间可加空格。
+时间=202610220830 或 时间=2026-10-22T08:30：六爻后选填，默认当前北京时间；子指令可用空格分隔。
 /六爻 开、/六爻 关：管理员开启或关闭本群起卦。
 /起卦 六爻 <内容>：同样可用。
 /六爻反馈：查看本人当前群全部卦例；玉绿待反馈、金边已反馈、灰色不可反馈。

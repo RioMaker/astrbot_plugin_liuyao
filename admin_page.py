@@ -158,6 +158,19 @@ class AdminPageMixin:
             "total": len(rows),
         }
 
+    @staticmethod
+    def _case_recorded_sort_key(case: dict) -> tuple[datetime, int]:
+        # Legacy cases predate recorded_at; their cast time was also their call time.
+        for value in (case.get("recorded_at"), case.get("created_at")):
+            try:
+                timestamp = datetime.fromisoformat(str(value))
+            except ValueError:
+                continue
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=BEIJING)
+            return timestamp, case["serial"]
+        return datetime.min.replace(tzinfo=BEIJING), case["serial"]
+
     async def _page_users(self, *, query) -> dict:
         await self._ensure_user_registry()
         search, page = self._page_options(query)
@@ -242,6 +255,7 @@ class AdminPageMixin:
                         "question",
                         "analysis_question",
                         "created_at",
+                        "recorded_at",
                     )
                 }
                 | {
@@ -251,7 +265,7 @@ class AdminPageMixin:
                     "primary_name": case.get("cast", {}).get("primary_name", ""),
                 }
             )
-        rows.sort(key=lambda c: c["created_at"], reverse=True)
+        rows.sort(key=self._case_recorded_sort_key, reverse=True)
         result = self._page_result(rows, page)
         runs = await self._token_runs()
         keys = {c["id"]: case_usage_key(c) for c in cases}

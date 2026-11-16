@@ -18,8 +18,9 @@ else:
 
 CASE_NUMBER_RE = re.compile(r"^(?:编号\s*|[#＃])([0-9]{1,12})(?:\s+([\s\S]*))?\Z")
 TIME_RE = re.compile(
-    r"^时间[=＝]\s*([0-9]{4}-[0-9]{2}-[0-9]{2})[Tt ]"
-    r"([0-9]{2}:[0-9]{2}(?::[0-9]{2})?)(?:\s+([\s\S]*))?\Z"
+    r"^时间[=＝]\s*(?P<value>[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ]"
+    r"[0-9]{2}:[0-9]{2}(?::[0-9]{2})?|[0-9]{12}(?:[0-9]{2})?)"
+    r"(?:\s+(?P<question>[\s\S]*))?\Z"
 )
 
 
@@ -31,16 +32,30 @@ def parse_manual_request(payload: str, *, now: datetime | None = None):
     if rest.startswith(("时间=", "时间＝")):
         match = TIME_RE.fullmatch(rest)
         if not match:
-            raise ManualCastError("时间格式：时间=2026-11-15T20:30（北京时间，可省略）")
+            raise ManualCastError(
+                "时间格式：时间=202610220830 或 时间=2026-10-22T08:30（北京时间，可省略）"
+            )
         try:
-            cast_at = datetime.fromisoformat(f"{match[1]}T{match[2]}").replace(tzinfo=BEIJING)
+            value = match["value"]
+            if value.isdigit():
+                cast_at = datetime(
+                    int(value[:4]),
+                    int(value[4:6]),
+                    int(value[6:8]),
+                    int(value[8:10]),
+                    int(value[10:12]),
+                    int(value[12:14]) if len(value) == 14 else 0,
+                    tzinfo=BEIJING,
+                )
+            else:
+                cast_at = datetime.fromisoformat(value).replace(tzinfo=BEIJING)
             if not 1900 <= cast_at.year <= 2100:
                 raise ValueError
         except ValueError as exc:
             raise ManualCastError(
                 "起卦时间无效，请填写 1900–2100 年的真实公历日期和时分。"
             ) from exc
-        source, rest = "specified", (match[3] or "").strip()
+        source, rest = "specified", (match["question"] or "").strip()
     return replace(cast, cast_at=cast_at.astimezone(BEIJING)), rest, source
 
 
@@ -77,7 +92,7 @@ class ManualCommandsMixin:
         except ManualCastError as exc:
             action = "解卦" if analyze else "排盘"
             return (
-                f"{exc}\n用法：/六爻{action} 789678 [时间=2026-11-15T20:30] [问题]\n"
+                f"{exc}\n用法：/六爻{action} 789678 [时间=202610220830] [问题]\n"
                 "六爻按初爻到上爻填写；6 老阴、7 少阳、8 少阴、9 老阳。"
                 "也可填写六组正反结果（正=3，反=2）。"
             )
