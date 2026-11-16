@@ -268,16 +268,20 @@ def bits_to_hexagram_number(bits: Sequence[int]) -> int:
 
 
 def render_diagram(cast: CastResult) -> str:
-    """Render original and changed hexagrams side-by-side, top line first."""
+    """Render top line first, adding a changed hexagram only for moving casts."""
 
-    rows = ["本卦　　　　　之卦"]
+    has_changes = bool(cast.moving_lines)
+    rows = ["本卦　　　　　之卦" if has_changes else "本卦"]
     changed = cast.changed_bits
     for index in range(5, -1, -1):
         value = cast.lines[index]
         primary_line = "━━━━━━" if value in (7, 9) else "━━  ━━"
-        marker = " ○" if value == 9 else " ×" if value == 6 else "  "
-        changed_line = "━━━━━━" if changed[index] else "━━  ━━"
-        rows.append(f"{index + 1} {primary_line}{marker}　{changed_line}")
+        row = f"{index + 1} {primary_line}"
+        if has_changes:
+            marker = " ○" if value == 9 else " ×" if value == 6 else "  "
+            changed_line = "━━━━━━" if changed[index] else "━━  ━━"
+            row += f"{marker}　{changed_line}"
+        rows.append(row)
     return "\n".join(rows)
 
 

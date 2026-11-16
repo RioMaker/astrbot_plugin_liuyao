@@ -451,10 +451,18 @@ class LiuyaoImageRenderer:
         )
 
     def _draw_chart(self, draw, y, cast, chart, f):
-        edges = (MARGIN, 154, 264, 420, 756, 840, WIDTH - MARGIN)
+        has_changes = bool(cast.moving_lines)
+        edges = (
+            (MARGIN, 154, 264, 420, 756, 840, WIDTH - MARGIN)
+            if has_changes
+            else (MARGIN, 210, 390, 630, 1030, WIDTH - MARGIN)
+        )
+        labels = ("爻位", "六神", "伏神", "本卦", "世应") + (("之卦",) if has_changes else ())
+        centers = [(left + right) / 2 for left, right in zip(edges[:-1], edges[1:], strict=True)]
+        primary_x = centers[3] - (150 if has_changes else 115)
+        role_x = centers[4]
         draw.rounded_rectangle((MARGIN, y, WIDTH - MARGIN, y + 60), radius=7, fill=PANEL)
-        for index, label in enumerate(("爻位", "六神", "伏神", "本卦", "世应", "之卦")):
-            center = (edges[index] + edges[index + 1]) / 2
+        for center, label in zip(centers, labels, strict=True):
             self._text(
                 draw,
                 center - draw.textlength(label, font=f["data"]) / 2,
@@ -467,28 +475,32 @@ class LiuyaoImageRenderer:
             top = y + 60 + index * 76
             base = top + 24
             line = chart["primary"][position - 1]
-            changed = chart["changed"][position - 1]
             moving = position in cast.moving_lines
             if moving:
                 draw.rectangle((MARGIN, top, WIDTH - MARGIN, top + 76), fill="#F6EAE3")
                 draw.rectangle((MARGIN, top, MARGIN + 4, top + 76), fill=ACCENT)
-            self._text(draw, 78, base, LINE_LABELS[position], f["data"])
+            self._text(draw, centers[0] - 29, base, LINE_LABELS[position], f["data"])
             self._text(
-                draw, 177, base, line["spirit"], f["data"], SPIRIT_COLORS.get(line["spirit"], MUTED)
+                draw,
+                centers[1] - 32,
+                base,
+                line["spirit"],
+                f["data"],
+                SPIRIT_COLORS.get(line["spirit"], MUTED),
             )
             hidden = line["hidden"]
             self._text(
                 draw,
-                278 if hidden else 327,
+                centers[2] - (64 if hidden else 15),
                 base,
                 hidden["label"] if hidden else "—",
                 f["data"],
                 ELEMENT_COLORS.get(hidden["element"], INK) if hidden else MUTED,
             )
-            self._draw_line(draw, 438, base + 6, cast.primary_bits[position - 1])
+            self._draw_line(draw, primary_x, base + 6, cast.primary_bits[position - 1])
             self._text(
                 draw,
-                533,
+                primary_x + 95,
                 base,
                 self._line_label(line),
                 f["data"],
@@ -497,26 +509,30 @@ class LiuyaoImageRenderer:
             if moving:
                 self._text(
                     draw,
-                    727,
+                    primary_x + 289,
                     base - 1,
                     "○" if cast.lines[position - 1] == 9 else "×",
                     f["data"],
                     ACCENT,
                 )
             if line["role"]:
-                draw.rounded_rectangle((780, base - 6, 816, base + 35), radius=4, fill=JADE)
-                self._text(draw, 784, base - 1, line["role"], f["data"], PAPER)
+                draw.rounded_rectangle(
+                    (role_x - 18, base - 6, role_x + 18, base + 35), radius=4, fill=JADE
+                )
+                self._text(draw, role_x - 14, base - 1, line["role"], f["data"], PAPER)
             else:
-                self._text(draw, 785, base, "—", f["data"], MUTED)
-            self._draw_line(draw, 860, base + 6, cast.changed_bits[position - 1])
-            self._text(
-                draw,
-                958,
-                base,
-                self._line_label(changed),
-                f["data"],
-                ELEMENT_COLORS.get(changed["element"], INK),
-            )
+                self._text(draw, role_x - 13, base, "—", f["data"], MUTED)
+            if has_changes:
+                changed = chart["changed"][position - 1]
+                self._draw_line(draw, 860, base + 6, cast.changed_bits[position - 1])
+                self._text(
+                    draw,
+                    958,
+                    base,
+                    self._line_label(changed),
+                    f["data"],
+                    ELEMENT_COLORS.get(changed["element"], INK),
+                )
             draw.line((MARGIN, top + 76, WIDTH - MARGIN, top + 76), fill=RULE)
         for edge in edges:
             draw.line((edge, y + 7, edge, y + 516), fill=RULE)

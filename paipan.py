@@ -135,7 +135,7 @@ def chart_for(cast, cast_at: datetime | None = None) -> dict[str, Any]:
     return build_chart(cast, cast_at)
 
 
-def chart_text(chart: dict[str, Any]) -> str:
+def chart_text(chart: dict[str, Any], *, show_changed: bool = True) -> str:
     calendar = chart["calendar"]
     rows = ["排盘口径：" + calendar["rule"]]
     if calendar["status"] == "已计算":
@@ -150,21 +150,29 @@ def chart_text(chart: dict[str, Any]) -> str:
     else:
         rows.append("日月干支/月建/旬空/六神" + calendar["status"])
     rows.append(f"世应：世爻在{chart['shi']}爻，应爻在{chart['ying']}爻（本卦）")
-    for line, changed in zip(chart["primary"], chart["changed"], strict=True):
+    for index, line in enumerate(chart["primary"]):
         hidden = line["hidden"]
         hidden_text = (
             f"；伏神：{hidden['relative']}{hidden['stem']}{hidden['branch']}{hidden['element']}"
             if hidden
             else ""
         )
-        rows.append(
+        row = (
             f"{line['position']}爻 {line['spirit']} {line['role'] or '—'} "
             f"{line['relative']}{line['stem']}{line['branch']}{line['element']}"
-            f" → {changed['relative']}{changed['stem']}{changed['branch']}{changed['element']}"
-            + hidden_text
         )
-    rows.append(
-        "伏神按本卦缺失六亲从本宫首卦列候选；变卦六亲沿用本卦宫五行。"
-        "此处之卦逐爻列装卦信息，只有原动爻发生动变；静爻不作化爻。"
-    )
+        if show_changed:
+            changed = chart["changed"][index]
+            row += (
+                f" → {changed['relative']}{changed['stem']}{changed['branch']}{changed['element']}"
+            )
+        rows.append(row + hidden_text)
+    note = "伏神按本卦缺失六亲从本宫首卦列候选"
+    if show_changed:
+        note += (
+            "；变卦六亲沿用本卦宫五行。此处之卦逐爻列装卦信息，只有原动爻发生动变；静爻不作化爻。"
+        )
+    else:
+        note += "。"
+    rows.append(note)
     return "\n".join(rows)

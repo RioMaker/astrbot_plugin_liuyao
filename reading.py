@@ -82,7 +82,7 @@ class ReadingService:
                 (
                     f"之卦：{changed['symbol']} 第{changed['number']}卦 {changed['name']}"
                     if moving
-                    else "之卦：无动爻"
+                    else "卦态：静卦（无动爻）"
                 ),
                 render_diagram(cast),
                 "六爻（初爻→上爻）：" + " ".join(str(value) for value in cast.lines),
@@ -109,7 +109,7 @@ class ReadingService:
         else:
             rows.append("动爻：无；结合本卦、六亲与所问分类研判，不虚构动变。")
 
-        rows.append(chart_text(chart_for(cast)))
+        rows.append(chart_text(chart_for(cast), show_changed=bool(moving)))
         focus = "、".join(str(item) for item in profile.get("focus", []))
         if focus:
             rows.append(f"{profile['label']}关注：{focus}")

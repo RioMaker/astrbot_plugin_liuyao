@@ -249,7 +249,8 @@ def test_manual_command_accepts_direct_hexagram_name() -> None:
     )
     assert "手动指定卦名（乾静卦）" in result
     assert "本卦：䷀ 第1卦 乾" in result
-    assert "之卦：无动爻" in result
+    assert "卦态：静卦（无动爻）" in result
+    assert "之卦" not in result
     assert "所问：这个项目如何推进" in result
 
 

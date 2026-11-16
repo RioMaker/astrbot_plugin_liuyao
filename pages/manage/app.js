@@ -395,7 +395,11 @@ function openCase(id) {
   return openDetail("卦例管理", "卦例详情", () => bridge.apiGet(`manage/cases/${encodeURIComponent(id)}`), ({ case: record, revision, token_usage: usage, usage_id }) => {
     $("detail-title").textContent = `卦例 #${record.serial}`;
     const body = $("detail-body"), cast = record.cast || {}, facts = node("div", "", "facts");
-    facts.append(fact("本卦 → 变卦", `${cast.primary_name || "—"} → ${cast.changed_name || "—"}`), fact("起卦用户", `${record.caster_name || ""} ${record.caster_id}`), fact("群号", record.group_id));
+    const moving = (cast.lines || []).some((value) => value === 6 || value === 9) || (cast.moving_lines || []).length > 0;
+    facts.append(
+      moving ? fact("本卦 → 之卦", `${cast.primary_name || "—"} → ${cast.changed_name || "—"}`) : fact("本卦", `${cast.primary_name || "—"} · 静卦`),
+      fact("起卦用户", `${record.caster_name || ""} ${record.caster_id}`), fact("群号", record.group_id),
+    );
     body.append(facts, node("p", `调用时间：${time(record.recorded_at)} · 起卦时间：${time(record.created_at)} · ${record.method || ""} · ${record.intent_label || ""}`, "help"));
     const tokens = section("本卦 Token 消耗");
     tokens.append(fact("累计（含复解与反馈审核）", tokenText(usage, true)));
