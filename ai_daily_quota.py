@@ -13,6 +13,11 @@ from typing import Any
 
 from astrbot.api import logger
 
+if __package__:
+    from .ai_cooldown import AICooldownMixin
+else:
+    from ai_cooldown import AICooldownMixin
+
 BEIJING = timezone(timedelta(hours=8))
 STORAGE_ERROR = "AI 次数记录读取或保存失败，本次暂不调用 AI，请稍后重试。"
 GIFT_RESERVATION_SECONDS = 900
@@ -46,6 +51,9 @@ class AIQuotaLease:
     quota_unlimited: bool = False
     source: str = "daily"
     _finished: bool = False
+    cooldown_sender: str = ""
+    cooldown_token: str = ""
+    cooldown_hold: str = ""
 
     async def commit(self) -> None:
         if not self.error and not self._finished:
@@ -53,13 +61,16 @@ class AIQuotaLease:
             self._finished = True
 
     async def release(self) -> None:
-        if not self.error and not self._finished:
+        if not self.error and (not self._finished or self.cooldown_hold):
             await self.owner._finish_ai_daily(self, used=False)
             self._finished = True
 
 
-class DailyAIQuotaMixin:
+class DailyAIQuotaMixin(AICooldownMixin):
     AI_DAILY_LABEL = "本插件"
+
+    def _cooldown_denied(self, notice: str) -> AIQuotaLease:
+        return AIQuotaLease(self, error=f"六爻：{notice}本次仅排盘，不调用 AI 解读。")
 
     @staticmethod
     def _ai_daily_now() -> datetime:
@@ -350,7 +361,11 @@ class DailyAIQuotaMixin:
                 if not limit or self._is_ai_quota_whitelisted(event)
                 else str(max(0, limit - used))
             )
-            return f"额度余量：{remaining}{f' +{extra}' if extra else ''} 次（已扣除处理中预留）。"
+            cooldown = await self._ai_cooldown_status(event)
+            return (
+                f"额度余量：{remaining}{f' +{extra}' if extra else ''} 次（已扣除处理中预留）。"
+                + ("\n" + cooldown if cooldown else "")
+            )
         except Exception:
             return "额度余量暂时无法读取，可稍后发送 /额度 查询。"
 
@@ -365,7 +380,8 @@ class DailyAIQuotaMixin:
             # Event/session data may be changed by other framework handlers.
             # Freeze the admission identity before the first await.
             key, token = self._daily_identity(event)
-            gift_key = self._gift_key(str(event.get_sender_id() or "").strip())
+            sender = str(event.get_sender_id() or "").strip()
+            gift_key = self._gift_key(sender)
             now = self._ai_daily_now().astimezone(BEIJING)
             day = now.date().isoformat()
             yesterday = (now.date() - timedelta(days=1)).isoformat()
@@ -376,9 +392,13 @@ class DailyAIQuotaMixin:
         # A cancellation during the persistent write must not leave an unused
         # reservation behind. Wait for its outcome, then release it.
         task = asyncio.create_task(
-            self._reserve_ai_daily_uninterrupted(key, token, day, yesterday, limit, gift_key)
+            self._reserve_ai_with_cooldown(sender, key, token, day, yesterday, limit, gift_key)
         )
-        lease, cancelled = await _wait_persistent_task(task)
+        try:
+            lease, cancelled = await _wait_persistent_task(task)
+        except Exception as exc:
+            logger.error(f"AI 冷却记录读取或预约失败：{type(exc).__name__}")
+            return AIQuotaLease(self, error=STORAGE_ERROR)
         if cancelled:
             await _wait_persistent_task(asyncio.create_task(lease.release()))
             raise asyncio.CancelledError
@@ -416,6 +436,9 @@ class DailyAIQuotaMixin:
                 if rules
                 else "\n反馈奖励规则：未配置，当前无额外额度"
             )
+            cooldown = await self._ai_cooldown_status(event)
+            if cooldown:
+                rule_progress = "\n" + cooldown + rule_progress
             quota_detail = (
                 f"基础 {base_limit} 次 + 反馈奖励 {applied_bonus} 次" if base_limit > 0 else "不限"
             )
@@ -570,27 +593,27 @@ class DailyAIQuotaMixin:
         async def finish() -> None:
             try:
                 async with self._daily_lock():
-                    if lease._finished:
-                        return
-                    record = (
-                        await self._load_gift_record(lease.key)
-                        if lease.source == "gift"
-                        else await self._load_daily_record(lease.key)
-                    )
-                    entries = record["days"].get(lease.day, {})
-                    entry = entries.get(lease.token)
-                    if entry is None or lease.hold not in entry["holds"]:
-                        raise ValueError("quota reservation disappeared")
-                    if lease.source == "gift" and used and not entry["used"]:
-                        if record["balance"] <= 0:
-                            raise ValueError("gift balance exhausted")
-                        record["balance"] -= 1
-                    entry["used"] = entry["used"] or used
-                    entry["holds"].remove(lease.hold)
-                    if not entry["used"] and not entry["holds"]:
-                        del entries[lease.token]
-                    await self.put_kv_data(lease.key, record)
-                    lease._finished = True
+                    if not lease._finished:
+                        record = (
+                            await self._load_gift_record(lease.key)
+                            if lease.source == "gift"
+                            else await self._load_daily_record(lease.key)
+                        )
+                        entries = record["days"].get(lease.day, {})
+                        entry = entries.get(lease.token)
+                        if entry is None or lease.hold not in entry["holds"]:
+                            raise ValueError("quota reservation disappeared")
+                        if lease.source == "gift" and used and not entry["used"]:
+                            if record["balance"] <= 0:
+                                raise ValueError("gift balance exhausted")
+                            record["balance"] -= 1
+                        entry["used"] = entry["used"] or used
+                        entry["holds"].remove(lease.hold)
+                        if not entry["used"] and not entry["holds"]:
+                            del entries[lease.token]
+                        await self.put_kv_data(lease.key, record)
+                        lease._finished = True
+                await self._release_ai_cooldown(lease)
             except Exception as exc:
                 logger.error(f"AI 日限额确认或释放失败：{type(exc).__name__}")
                 raise AIQuotaStorageError(STORAGE_ERROR) from exc

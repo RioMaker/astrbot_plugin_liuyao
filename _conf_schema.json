@@ -41,6 +41,42 @@
     "default": 1,
     "hint": "有效范围 0–10000，默认每个 QQ 账号每天 1 次，0 表示不限；跨群共享，北京时间每天 00:00 重置。先预留额度，成功生成有效解卦后预审与解卦合并计 1 次；无有效问题、预审拒绝或模型失败不扣每日或赠送次数。额度用完仍会起卦并发送卦图，但不调用 AI。"
   },
+  "ai_cooldown_enabled": {
+    "type": "bool",
+    "description": "启用 AI 解卦冷却",
+    "default": false,
+    "hint": "开启后每个 QQ 账号跨群、跨平台实例共用冷却，成功保存有效解卦后开始计时；冷却期间仍可排盘和提交反馈。每日额度、反馈奖励与赠额仍保留，但有余额也需等待冷却；白名单和管理员调试豁免。默认关闭，兼容原有每日额度行为。"
+  },
+  "ai_first_cooldown_enabled": {
+    "type": "bool",
+    "description": "启用首次 AI 解卦的特殊冷却",
+    "default": true,
+    "hint": "仅在 AI 解卦冷却总开关开启时生效。新用户首次成功解卦后进入下方首次冷却；该卦例反馈审核通过后，立即改按正常冷却计算，仍从解卦成功时计时。首次等待结束后的后续解卦使用正常冷却；关闭本项则始终使用正常冷却。"
+  },
+  "ai_first_cooldown_duration": {
+    "type": "int",
+    "description": "首次 AI 解卦冷却时长",
+    "default": 7,
+    "hint": "正整数，范围 1–87600；与下方单位配合，默认 7 天。无效值回退默认值。"
+  },
+  "ai_first_cooldown_unit": {
+    "type": "string",
+    "description": "首次冷却时间单位",
+    "default": "天",
+    "options": ["小时", "天"]
+  },
+  "ai_normal_cooldown_duration": {
+    "type": "int",
+    "description": "正常 AI 解卦冷却时长",
+    "default": 24,
+    "hint": "正整数，范围 1–87600；与下方单位配合，默认 24 小时。从最近一次成功解卦时计时，补解、复解也计入。修改时长后按保存的成功时间重新计算。"
+  },
+  "ai_normal_cooldown_unit": {
+    "type": "string",
+    "description": "正常冷却时间单位",
+    "default": "小时",
+    "options": ["小时", "天"]
+  },
   "ai_quota_feedback_rules": {
     "type": "template_list",
     "description": "有效反馈奖励规则",

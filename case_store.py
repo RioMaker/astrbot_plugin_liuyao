@@ -255,6 +255,7 @@ class LiuyaoCaseStoreMixin:
         async with self._case_lock_instance():
             payload = copy.deepcopy(await self.get_kv_data(LIUYAO_CASES_KEY, {}))
             cases = normalize_case_store(payload)
+            payload = serialize_case_store(cases, payload)
             case = next((row for row in cases if row["id"] == case_id), None)
             if (
                 case is None
@@ -262,6 +263,8 @@ class LiuyaoCaseStoreMixin:
                 or str(case.get("group_id", "")) != str(event.get_group_id())
             ):
                 raise ValueError("当前用户在本群的卦例不存在")
+            if status == "success" and analysis:
+                self._record_ai_cooldown_success(payload, event, case_id)
             history = analysis_history(case)
             at = datetime.now(BEIJING).isoformat()
             entry = {
@@ -353,7 +356,7 @@ class LiuyaoCaseStoreMixin:
         caster_id = str(event.get_sender_id() or "").strip()
         try:
             async with self._case_lock_instance():
-                payload = await get_data(LIUYAO_CASES_KEY, {})
+                payload = copy.deepcopy(await get_data(LIUYAO_CASES_KEY, {}))
                 cases = normalize_case_store(payload)
                 eligible = [
                     case
@@ -434,6 +437,7 @@ class LiuyaoCaseStoreMixin:
                         current_score = 0
                     scores[caster_id] = current_score + 1
                     updated_payload["user_scores"] = scores
+                    self._record_ai_cooldown_feedback(updated_payload, caster_id, str(case["id"]))
                 await put_data(LIUYAO_CASES_KEY, updated_payload)
             if answer and case.get("intent") == "shefu":
                 score_note = "AI 审核有效，已记入积分。" if reviewed_valid else ""
