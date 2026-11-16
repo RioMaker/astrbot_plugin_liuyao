@@ -3,10 +3,48 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
-
+from collections.abc import Iterable
+from typing import Any
 
 CASE_SCHEMA_VERSION = 2
+
+
+def feedback_closed(case: dict[str, Any]) -> bool:
+    return any(
+        isinstance(row, dict) and row.get("valid") is not False for row in case.get("feedback", [])
+    )
+
+
+def feedback_eligible(case: dict[str, Any]) -> bool:
+    return bool(str(case.get("analysis") or "").strip()) and not feedback_closed(case)
+
+
+def feedback_status(case: dict[str, Any]) -> str:
+    if feedback_closed(case):
+        return "已反馈"
+    if feedback_eligible(case):
+        return "待反馈"
+    return "未完成 AI 解卦 · 不可反馈" if case.get("analysis_history") else "仅排盘 · 不可反馈"
+
+
+def analysis_history(case: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose a legacy original without fabricating its date, provider or token usage."""
+    history = [row for row in case.get("analysis_history", []) if isinstance(row, dict)]
+    if not history and str(case.get("analysis") or "").strip():
+        return [
+            {
+                "id": "legacy-original",
+                "status": "success",
+                "legacy": True,
+                "at": case.get("analysis_at"),
+                "question": case.get("question", ""),
+                "analysis": case["analysis"],
+                "verdict": case.get("verdict", ""),
+                "calls": [],
+                "usage": None,
+            }
+        ]
+    return history
 
 
 def normalize_case_store(payload: Any) -> list[dict[str, Any]]:
@@ -110,6 +148,7 @@ def search_cases(
             [
                 str(case.get("question") or ""),
                 str(case.get("analysis") or ""),
+                str(case.get("analysis_question") or ""),
                 str(case.get("verdict") or ""),
                 str(case.get("answer") or ""),
                 " ".join(
@@ -167,8 +206,9 @@ def format_case_references(cases: Iterable[dict[str, Any]]) -> str:
         rows.extend(
             [
                 f"卦例 {case.get('id', '未知')}｜{case.get('created_at', '')}",
-                f"编号：{int(case.get('serial') or 0):03d}；真实答案：{case.get('answer') or '尚未揭晓'}",
-                f"原问：{case.get('question') or '未填写'}",
+                f"编号：{int(case.get('serial') or 0):03d}；"
+                f"真实答案：{case.get('answer') or '尚未揭晓'}",
+                f"原问：{case.get('analysis_question') or case.get('question') or '未填写'}",
                 f"方向：{case.get('intent_label') or case.get('intent') or '未分类'}",
                 (
                     f"卦象：第{cast.get('primary_number', '?')}卦"

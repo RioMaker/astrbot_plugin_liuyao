@@ -9,7 +9,13 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 try:
-    from .case_library import extract_verdict
+    from .case_library import (
+        analysis_history,
+        extract_verdict,
+        feedback_closed,
+        feedback_eligible,
+        feedback_status,
+    )
     from .divination import CastResult
     from .paipan import BEIJING, chart_for
     from .renderer import (
@@ -29,7 +35,13 @@ try:
     )
     from .textcard import _wrap
 except ImportError:  # pragma: no cover
-    from case_library import extract_verdict
+    from case_library import (
+        analysis_history,
+        extract_verdict,
+        feedback_closed,
+        feedback_eligible,
+        feedback_status,
+    )
     from divination import CastResult
     from paipan import BEIJING, chart_for
     from renderer import (
@@ -55,6 +67,18 @@ CONTENT_WIDTH = WIDTH - 2 * MARGIN
 QUEUE_NUMBER_WIDTH = 134
 QUEUE_NUMBER_SIZE = 36
 QUEUE_TEXT_OFFSET = 174
+GOLD = "#AC873E"
+GOLD_BG = "#F1E4BD"
+GOLD_INK = "#725322"
+DISABLED_BG = "#626A69"
+
+
+def number_palette(case):
+    if feedback_closed(case):
+        return GOLD_BG, GOLD, GOLD_INK
+    if feedback_eligible(case):
+        return JADE, JADE, PAPER
+    return DISABLED_BG, DISABLED_BG, PAPER
 
 
 def short_time(value: Any, *, now: datetime | None = None) -> str:
@@ -184,7 +208,7 @@ class LiuyaoFeedbackCardRenderer:
         rows = []
         for case in cases:
             lines = self._lines(
-                case.get("question") or "未记录问题",
+                case.get("analysis_question") or case.get("question") or "未记录问题",
                 width=CONTENT_WIDTH - QUEUE_TEXT_OFFSET,
                 limit=2,
             )
@@ -192,8 +216,8 @@ class LiuyaoFeedbackCardRenderer:
         height = 248 + sum(row[2] for row in rows) + 156 + len(rules) * 72 + 170
         if not rows:
             height += 82
-        canvas, draw = self._canvas(height, "待反馈", f"共 {total} 例 · {page}/{pages} 页")
-        self._text(draw, MARGIN, 119, "查看卦例与原断，再填写实际进展", 25, MUTED)
+        canvas, draw = self._canvas(height, "我的卦例", f"共 {total} 例 · {page}/{pages} 页")
+        self._text(draw, MARGIN, 119, "玉绿：待反馈    金边：已反馈    灰色：不可反馈", 25, MUTED)
         draw.rounded_rectangle((MARGIN, 166, WIDTH - MARGIN, 209), radius=8, fill=PANEL)
         draw.text(
             (MARGIN + QUEUE_NUMBER_WIDTH / 2, 176),
@@ -206,10 +230,13 @@ class LiuyaoFeedbackCardRenderer:
         y = 230
         for case, lines, row_height in rows:
             number_height = 52
+            background, border, foreground = number_palette(case)
             draw.rounded_rectangle(
                 (MARGIN, y, MARGIN + QUEUE_NUMBER_WIDTH, y + number_height),
                 radius=10,
-                fill=JADE,
+                fill=background,
+                outline=border,
+                width=3,
             )
             number = str(case["serial"])
             font = self._font(QUEUE_NUMBER_SIZE)
@@ -221,13 +248,23 @@ class LiuyaoFeedbackCardRenderer:
                 ),
                 number,
                 font=font,
-                fill=PAPER,
+                fill=foreground,
             )
+            label = (
+                "已反馈"
+                if feedback_closed(case)
+                else "待反馈"
+                if feedback_eligible(case)
+                else "不可反馈"
+            )
+            self._text(draw, MARGIN + 13, y + 60, label, 23, MUTED)
             x = MARGIN + QUEUE_TEXT_OFFSET
             for index, line in enumerate(lines):
                 self._text(draw, x, y + index * 44, line, 31)
             conclusion = self._lines(
-                f"原断：{saved_conclusion(case, fallback='未保存')}",
+                f"原断：{saved_conclusion(case, fallback='未保存')}"
+                if case.get("analysis")
+                else feedback_status(case),
                 25,
                 CONTENT_WIDTH - QUEUE_TEXT_OFFSET,
                 1,
@@ -249,7 +286,7 @@ class LiuyaoFeedbackCardRenderer:
             y += row_height
             draw.line((MARGIN, y - 14, WIDTH - MARGIN, y - 14), fill=RULE)
         if not rows:
-            self._text(draw, MARGIN, y + 12, "暂无待反馈卦例", 32, MUTED)
+            self._text(draw, MARGIN, y + 12, "暂无保存的卦例", 32, MUTED)
             y += 82
         y += 12
         panel_height = 98 + len(rules) * 72 if rules else 142
@@ -293,12 +330,15 @@ class LiuyaoFeedbackCardRenderer:
             self._text(draw, MARGIN + 26, rule_y - 3, "暂无加额规则", 24, MUTED)
         y += panel_height + 32
         example_number = str(rows[0][0]["serial"]) if rows else "编号"
+        feedback_number = next(
+            (str(row[0]["serial"]) for row in rows if feedback_eligible(row[0])), "编号"
+        )
         self._text(draw, MARGIN, y, f"看原卦：/六爻反馈 {example_number}", 28, JADE)
         self._text(
             draw,
             MARGIN,
             y + 48,
-            f"交反馈：/六爻反馈 {example_number} 实际发生了……，与原断相比……",
+            f"交反馈：/六爻反馈 {feedback_number} 实际发生了……，与原断相比……",
             28,
             JADE,
         )
@@ -314,13 +354,41 @@ class LiuyaoFeedbackCardRenderer:
     def render_case(self, *, case, corpus, conclusion, status, output_path=None) -> Path:
         cast = case_cast(case)
         chart = chart_for(cast, cast.cast_at)
-        question = self._lines(case.get("question") or "未记录问题", 33, CONTENT_WIDTH - 48)
+        question = self._lines(
+            case.get("analysis_question") or case.get("question") or "未记录问题",
+            33,
+            CONTENT_WIDTH - 48,
+        )
         verdict = self._lines(conclusion, 34, CONTENT_WIDTH - 56)
         question_height = len(question) * 48 + 42
         calendar = chart["calendar"]
         calendar_height = 176 if calendar.get("status") == "已计算" else 66
         conclusion_height = 94 + len(verdict) * 52
-        height = 206 + question_height + calendar_height + 606 + conclusion_height + 178
+        history = analysis_history(case)
+        history_lines = []
+        if history:
+            history_lines.append(f"解读记录 · 共 {len(history)} 次（最近 3 次）")
+            for row in history[-3:]:
+                usage = row.get("usage") or {}
+                total = usage.get("total_tokens")
+                tokens = (
+                    "未知"
+                    if total is None
+                    else str(total) + (" + 未知" if usage.get("unknown_calls") else "")
+                )
+                model = row.get("model") or row.get("provider") or "模型未记录"
+                label = "成功" if row.get("status") == "success" else "未完成"
+                values = [
+                    f"{short_time(row.get('at'))} · {label} · {model} · Token {tokens}",
+                    "问题：" + str(row.get("question") or "未记录"),
+                    "结论：" + str(row.get("verdict") or row.get("reason") or "未保存独立结论"),
+                ]
+                for value in values:
+                    history_lines.extend(self._lines(value, 24, CONTENT_WIDTH - 56, 2))
+        history_height = 48 + len(history_lines) * 36 if history_lines else 0
+        height = (
+            206 + question_height + calendar_height + 606 + conclusion_height + 178 + history_height
+        )
         canvas, draw = self._canvas(height, f"卦例 {case['serial']}", status)
         calendar_time = calendar.get("cast_at") or case.get("created_at")
         self._text(
@@ -363,10 +431,15 @@ class LiuyaoFeedbackCardRenderer:
         for index, line in enumerate(verdict):
             self._text(draw, MARGIN + 28, y + 72 + index * 52, line, 34, JADE)
         y += conclusion_height + 32
+        for line in history_lines:
+            self._text(draw, MARGIN + 28, y, line, 24, MUTED)
+            y += 36
+        if history_lines:
+            y += 24
         instruction = (
             f"/六爻反馈 {case['serial']} 实际进展或结果"
             if status == "待反馈"
-            else "/六爻反馈 返回待反馈队列"
+            else f"/六爻解卦 #{case['serial']} [问题] · /六爻反馈 返回全部记录"
         )
         self._text(draw, MARGIN, y, instruction, 27, MUTED)
         return self._save(canvas, output_path)

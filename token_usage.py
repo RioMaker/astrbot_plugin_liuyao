@@ -91,6 +91,8 @@ def cast_usage_key(*, sender, group, cast_at, lines) -> str:
 
 
 def case_usage_key(case) -> str:
+    if case.get("token_key"):
+        return str(case["token_key"])
     return cast_usage_key(
         sender=case.get("caster_id", ""),
         group=case.get("group_id", ""),
@@ -111,6 +113,8 @@ def empty_totals() -> dict:
 
 
 def add_call(totals, call):
+    if call.get("status") == "not_called":
+        return
     usage = call.get("usage") or {}
     totals["calls"] += 1
     known = usage.get("total_tokens") is not None
@@ -295,6 +299,15 @@ class TokenUsageMixin:
 
         await self._try_token_write(change)
 
+    async def _bind_token_case(self, run, case):
+        run.update(cast_key=case_usage_key(case), case_id=case["id"], serial=case["serial"])
+
+        def change(runs):
+            saved = runs.setdefault(run["id"], copy.deepcopy(run))
+            saved.update(cast_key=run["cast_key"], case_id=case["id"], serial=case["serial"])
+
+        await self._try_token_write(change)
+
     async def _try_token_write(self, change):
         try:
             await self._token_write(change)
@@ -310,13 +323,32 @@ class TokenUsageMixin:
             "at": self._ai_daily_now().astimezone(BEIJING).isoformat(),
             "status": "pending",
             "usage": None,
+            "model": "",
         }
+        getter = getattr(self.context, "get_provider_by_id", None)
+        if callable(getter):
+            try:
+                provider = getter(call["provider"])
+                model = provider.get_model() if provider is not None else None
+                if isinstance(model, str):
+                    call["model"] = model[:256]
+            except Exception:
+                pass
+
+        run["calls"].append(call)
 
         def start(runs):
-            runs.setdefault(run["id"], copy.deepcopy(run))["calls"].append(copy.deepcopy(call))
+            saved = runs.setdefault(run["id"], copy.deepcopy(run))
+            if not any(row["id"] == call["id"] for row in saved["calls"]):
+                saved["calls"].append(copy.deepcopy(call))
 
         # Persist intent first: a timeout, cancellation or restart must not look like zero cost.
-        await self._token_write(start)
+        try:
+            await self._token_write(start)
+        except BaseException:
+            call["status"] = "not_called"
+            call["usage"] = dict.fromkeys(TOKEN_FIELDS, 0)
+            raise
         if trace is not None:
             trace.calls.append(call)
         started = perf_counter()
@@ -327,6 +359,9 @@ class TokenUsageMixin:
             raise
         else:
             call["usage"] = extract_usage(response)
+            model = _get(response, "model") or _get(_get(response, "raw_completion"), "model")
+            if isinstance(model, str) and model:
+                call["model"] = model[:256]
             call["status"] = "error" if _get(response, "role") == "err" else "returned"
             return response
         finally:

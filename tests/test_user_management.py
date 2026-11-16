@@ -224,7 +224,7 @@ async def registered_plugin():
     return plugin
 
 
-def test_backfill_once_and_new_casts_record_even_when_library_disabled():
+def test_backfill_once_and_disabled_library_prevents_unrecorded_casts():
     async def run():
         plugin = await registered_plugin()
         await plugin._ensure_user_registry()
@@ -236,8 +236,9 @@ def test_backfill_once_and_new_casts_record_even_when_library_disabled():
         await plugin._dispatch_liuyao(event, QUESTION)
         event.message_obj.message_id = "exhausted"
         await plugin._dispatch_liuyao(event, "另一件事情")
-        assert plugin.context.llm_generate.await_count == 2
-        assert (await plugin._managed_user("20002"))["cast_count"] == 2
+        plugin.context.llm_generate.assert_not_awaited()
+        with pytest.raises(ManagementError, match="用户不存在"):
+            await plugin._managed_user("20002")
         assert "liuyao_case_library" not in plugin._test_store
 
     asyncio.run(run())

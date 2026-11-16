@@ -68,13 +68,9 @@ def test_listener_records_only_caster_and_group_and_survives_restart():
         return [result async for result in plugin.collect_shefu_answer(answer)]
 
     messages = run(listen())
-    assert "001" in messages[0]["text"]
+    assert "尚未完成" in messages[0]["text"]
     saved = plugin._test_store[LIUYAO_CASES_KEY]["cases"][0]
-    assert saved["answer"] == "苹果"
-    assert saved["feedback"][0]["text"] == answer.message_str
-    assert saved["feedback"][0]["outcome"] == "未分类"
-    assert run(plugin._collect_shefu_answer(answer)) == ""
-    assert len(saved["feedback"]) == 1
+    assert not saved["answer"] and not saved["feedback"]
 
 
 def test_multiple_unrevealed_cases_require_number_and_preserve_predictions():
@@ -272,7 +268,7 @@ def test_browser_never_exposes_other_group_even_with_cross_group_references():
     assert "未找到" in run(plugin._case_browser(admin, "001"))
 
 
-def test_answer_before_analysis_keeps_feedback_status():
+def test_answer_before_analysis_cannot_close_or_reward_a_case():
     plugin = _make_enabled_plugin()
     event = _Event("member")
     case_id = create_case(plugin, event)
@@ -280,7 +276,7 @@ def test_answer_before_analysis_keeps_feedback_status():
     run(plugin._collect_shefu_answer(event))
     run(plugin._save_case_analysis(event, case_id, "断语：首选苹果。"))
     case = plugin._test_store[LIUYAO_CASES_KEY]["cases"][0]
-    assert case["status"] == "feedback_recorded" and case["answer"] == "苹果"
+    assert case["status"] == "analyzed" and not case["answer"] and not case["feedback"]
 
 
 def test_shefu_model_failure_still_keeps_original_cast():

@@ -16,6 +16,25 @@ QUESTION = "这个项目能否按期完成"
 ANALYSIS = "先落实合同条款。\n断语：条件落实后可按期完成。"
 
 
+def assert_original_preserved(current, original):
+    for key in (
+        "id",
+        "serial",
+        "cast",
+        "created_at",
+        "question",
+        "analysis",
+        "verdict",
+        "feedback",
+    ):
+        assert current.get(key) == original.get(key)
+    assert (
+        current["analysis_history"][: len(original["analysis_history"])]
+        == original["analysis_history"]
+    )
+    assert len(current["analysis_history"]) > len(original["analysis_history"])
+
+
 def prepare(*, replies=None, limit=0, library=True):
     plugin = _make_enabled_plugin()
     plugin.config.update(ai_daily_limit=limit, case_library_enabled=library)
@@ -96,7 +115,8 @@ def test_tool_review_rejection_or_failure_sends_chart_without_interpretation(rev
             "不能提供" in plugin._send_reply_payload.call_args.args[3]
             or "预审暂不可用" in plugin._send_reply_payload.call_args.args[3]
         )
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
 
     asyncio.run(run())
 
@@ -140,7 +160,9 @@ def test_reuse_interprets_inside_plugin_keeps_snapshot_and_original_prediction()
         prompt = plugin.context.llm_generate.call_args.kwargs["prompt"]
         assert QUESTION in prompt and "客户已口头同意，下一步呢" in prompt
         assert plugin._test_store["cast_policy:20002"] == original
-        assert plugin._test_store["liuyao_case_library"] == old_cases
+        assert_original_preserved(
+            plugin._test_store["liuyao_case_library"]["cases"][0], old_cases["cases"][0]
+        )
         rendered_cast = plugin._render_and_send_chart.call_args.args[1]
         assert list(rendered_cast.lines) == original["last"]["lines"]
         assert rendered_cast.chart == original["last"]["chart"]
@@ -199,7 +221,8 @@ def test_reuse_can_archive_first_successful_interpretation_after_review_failure(
         plugin, event = prepare(replies=["invalid review"])
         await plugin.cast_liuyao_tool(event, question=QUESTION)
         original = copy.deepcopy(plugin._test_store["cast_policy:20002"])
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
         plugin.context.llm_generate.side_effect = [
             SimpleNamespace(
                 completion_text='{"reject":false,"valid_question":true,"intent":"事业"}'

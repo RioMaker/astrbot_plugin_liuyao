@@ -30,6 +30,7 @@ if __package__:
         parse_intent_and_question,
     )
     from .feedback_review import FeedbackReviewMixin
+    from .manual_commands import ManualCommandsMixin
     from .model_settings import ModelSettingsMixin
     from .question_policy import NO_VALID_QUESTION_NOTICE, is_obvious_non_question
     from .reading import ReadingService
@@ -62,6 +63,7 @@ else:  # pragma: no cover - direct local execution
         parse_intent_and_question,
     )
     from feedback_review import FeedbackReviewMixin
+    from manual_commands import ManualCommandsMixin
     from model_settings import ModelSettingsMixin
     from question_policy import NO_VALID_QUESTION_NOTICE, is_obvious_non_question
     from reading import ReadingService
@@ -84,7 +86,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.36.0"
+PLUGIN_VERSION = "0.37.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -110,10 +112,14 @@ AGENT_ACTION_TOOL_NAMES = frozenset(
 )
 
 HELP_TEXT = """六爻使用指南
-/六爻 <内容>：写清想问的事，预审后起卦并解读；无额度时只返回卦图。
+/六爻 <内容>：写清想问的事，排盘并经预审后解读；无额度时只返回卦图。
+/六爻排盘 <六爻> [问题]：只排盘并存档；6/7/8/9 自下而上，也支持六组正反（正3反2）。
+/六爻解卦 <六爻> <问题>：按手摇结果排盘并 AI 解卦，成功后计次。
+/六爻解卦 #编号 [问题]：也支持“编号233”；沿用原盘，每次解读追加保存。
+时间=2026-11-15T20:30：可放在六爻结果后；不填按当前北京时间。/六爻 与子指令之间可加空格。
 /六爻 开、/六爻 关：管理员开启或关闭本群起卦。
 /起卦 六爻 <内容>：同样可用。
-/六爻反馈：查看待反馈编号与奖励进度。
+/六爻反馈：查看本人当前群全部卦例；玉绿待反馈、金边已反馈、灰色不可反馈。
 /六爻反馈 <编号>：回看原卦图与结论。
 /六爻反馈 <编号> <实际结果>：填写真实进展或结果；未通过可按原编号补充。
 /六爻反馈 列表 2：查看第 2 页，数字可替换。
@@ -139,6 +145,7 @@ def _reply_card_chain(sender_id: str, image_path: str) -> list[Any]:
 class LiuyaoPlugin(
     AdminPageMixin,
     ModelSettingsMixin,
+    ManualCommandsMixin,
     DebugMixin,
     TokenUsageMixin,
     UserManagementMixin,
@@ -990,7 +997,7 @@ class LiuyaoPlugin(
         event: AstrMessageEvent,
         tail: str,
     ) -> str:
-        """保留群开关与帮助；其他文本统一走 AI 预审起卦。"""
+        """精确匹配子命令；原有自由问卦及紧连根指令写法继续可用。"""
         if error := await self._user_access_error(event):
             return error
         text = (tail or "").strip()
@@ -1002,6 +1009,23 @@ class LiuyaoPlugin(
         if text == "关":
             return await self._switch_reply(event, METHOD_LIUYAO, False)
 
+        action, _, payload = re.match(r"^(\S+)(\s*)([\s\S]*)\Z", text).groups()
+        payload = payload.strip()
+        if action in {"排盘", "解卦"}:
+            return await self._manual_command_reply(event, payload, analyze=action == "解卦")
+        if action == "反馈":
+            return await self._feedback_command_reply(event, payload)
+        if action == "额度":
+            return await self._ai_quota_status(event)
+        if action == "帮助":
+            return await self._help_reply(event)
+        if action in {"test", "测试"}:
+            return await self._run_debug(event, payload)
+        if action == "起卦":
+            return await self._content_reply(event, payload)
+        if re.match(r"^(?:排盘|解卦)(?=[0-9#＃正反字花阳阴陰HhTt]|编号)", text):
+            return "子指令与参数之间请留空格，例如：/六爻排盘 789678 或 /六爻解卦 #233 问题。"
+
         return await self._content_reply(event, text)
 
     async def _content_reply(
@@ -1011,6 +1035,10 @@ class LiuyaoPlugin(
         *,
         original: dict[str, Any] | None = None,
         original_cast: CastResult | None = None,
+        supplied_cast: CastResult | None = None,
+        chart_only: bool = False,
+        case_record: dict[str, Any] | None = None,
+        time_source: str = "automatic",
         trace=None,
     ) -> str:
         """任意输入均排盘；仅对有效且合规的问题解卦，成功后计次。"""
@@ -1029,12 +1057,19 @@ class LiuyaoPlugin(
             )
         if error:
             return error
+        if trace is None and not bool(self._config_get("case_library_enabled", True)):
+            return "卦例库已关闭，请先开启卦例库；排盘和 AI 解卦均须保存记录。"
         raw_question = self._limited_question(content)
         intent_hint, question = parse_intent_and_question(raw_question)
         question = question or raw_question or "（未提供具体内容）"
         intent = self.readings.normalize_intent(intent_hint)
         no_question = is_obvious_non_question(question)
-        if original is not None:
+        if case_record is not None:
+            question = raw_question or str(
+                case_record.get("analysis_question") or case_record.get("question") or ""
+            )
+            no_question = is_obvious_non_question(question)
+        elif original is not None:
             question = str(original["question"])
             no_question = is_obvious_non_question(question) and is_obvious_non_question(
                 raw_question
@@ -1074,7 +1109,7 @@ class LiuyaoPlugin(
         try:
             lease = (
                 AIQuotaLease(self, quota_unlimited=True, _finished=True)
-                if trace is not None or no_question
+                if trace is not None or no_question or chart_only
                 else await self._reserve_ai_daily(event)
             )
         except AIQuotaStorageError:
@@ -1087,8 +1122,14 @@ class LiuyaoPlugin(
         )
         if trace is not None:
             trace.run_id = token_run["id"]
+        case_id = ""
+        attempt_started = False
+        attempt_finished = False
+        analysis = ""
+        analysis_recordable = False
+        refusal = ""
         try:
-            if no_question:
+            if no_question or chart_only:
                 progress_text = "已收到，本次仅进行普通排盘，不调用 AI，也不消耗 AI 解卦次数。"
             elif lease.error:
                 progress_text = lease.error
@@ -1102,13 +1143,125 @@ class LiuyaoPlugin(
                 )
             else:
                 progress_text = "已收到，正在为你起卦并解读；本次已预留 1 次今日 AI 解读额度。"
+            method = "AI 预审分类起卦"
+            if original is not None:
+                method = str(original["method"])
+            elif no_question or chart_only:
+                method = "普通排盘"
+            if supplied_cast is not None:
+                method = "手动摇卦排盘"
+            if trace is not None:
+                method = "管理员调试起卦"
+                await trace.step(
+                    "随机起卦请求",
+                    {
+                        "调用": "_prepare_cast",
+                        "方式": "随机六爻",
+                        "question": question,
+                        "intent": intent,
+                        "method": method,
+                        "enforce_frequency": False,
+                        "enforce_question": False,
+                        "enforce_duplicate": False,
+                        "persist": False,
+                        "Token": 0,
+                    },
+                )
+            cast, cast_error = original_cast, ""
+            if original is None:
+                cast, cast_error = await self._prepare_cast(
+                    event,
+                    supplied_cast,
+                    question=question,
+                    intent=intent,
+                    method=method,
+                    enforce_frequency=False,
+                    enforce_question=False,
+                    enforce_duplicate=False,
+                    persist=trace is None,
+                )
+            if cast_error:
+                if lease and not lease.error:
+                    await lease.release()
+                return cast_error
+
+            if trace is not None:
+                await trace.step(
+                    "排盘结果",
+                    {
+                        "六爻（自下而上）": cast.lines,
+                        "动爻位置": cast.moving_lines,
+                        "本卦序号": cast.primary_number,
+                        "之卦序号": cast.changed_number,
+                        "起卦时间": cast.cast_at,
+                        "排盘快照": cast.chart,
+                        "Token": 0,
+                    },
+                )
+            if cast.cast_at is not None:
+                await self._bind_token_cast(token_run, cast)
+
             if trace is None:
-                progress_text += "\n" + await self._ai_quota_brief(event)
+                if case_record is not None:
+                    case_id = str(case_record["id"])
+                elif cast.cast_at is not None:
+                    case_id, _, save_notice = await self._open_agent_case(
+                        event,
+                        cast,
+                        intent=intent,
+                        question=question,
+                        method=method,
+                        cast_at=cast.cast_at,
+                        track_agent=False,
+                        reuse_existing=original is not None,
+                        execution_mode="chart"
+                        if chart_only or no_question or lease.error
+                        else "ai",
+                        time_source=time_source,
+                        existing_case_id=str(original.get("case_id", "")) if original else "",
+                    )
+                    if not case_id:
+                        return save_notice + "本次未调用 AI，请稍后重试。"
+                else:
+                    return "原卦缺少可靠起卦时间，无法建立解卦记录。"
+                number = await self._case_number(case_id)
+                token_run.update(case_id=case_id, serial=number)
+                saved_case = next(
+                    row for row in await self._load_case_records() if row["id"] == case_id
+                )
+                await self._bind_token_case(token_run, saved_case)
+                if original is None:
+                    async with self._cast_lock:
+                        state_key = "cast_policy:" + sender_id
+                        state = copy.deepcopy(await self.get_kv_data(state_key, {}))
+                        last = state.get("last", {})
+                        if last.get("timestamp") == cast.cast_at.timestamp() and last.get(
+                            "lines"
+                        ) == list(cast.lines):
+                            last["case_id"] = case_id
+                            await self.put_kv_data(state_key, state)
+                if not chart_only and not no_question and not lease.error:
+                    try:
+                        await self._save_case_attempt(
+                            event, case_id, token_run, status="pending", question=question
+                        )
+                    except Exception:
+                        return "解卦记录保存失败，本次未调用 AI，请稍后重试。"
+                    attempt_started = True
+                progress_text += f"\n卦例 #{number} · /六爻反馈 查看全部记录"
+                if time_source != "automatic":
+                    progress_text += (
+                        "\n已按指定原起卦时间排盘。"
+                        if time_source == "specified"
+                        else "\n未指定原起卦时间，按收到指令时的北京时间排盘。"
+                    )
+                if not chart_only:
+                    progress_text += "\n" + await self._ai_quota_brief(event)
                 await self._send_caster_reply(event, sender_id, caster_name, progress_text)
 
             review = None
             review_error = ""
-            if not lease.error and not no_question:
+            if not lease.error and not no_question and not chart_only:
                 try:
                     review_provider = await self._analysis_provider_id(
                         event, "command_pre_review_provider_id"
@@ -1179,68 +1332,12 @@ class LiuyaoPlugin(
                         except AIQuotaStorageError:
                             logger.warning("liuyao：释放未使用的 AI 日额度预约失败")
 
-            method = "AI 预审分类起卦"
-            if original is not None:
-                method = str(original["method"])
-            elif no_question or (
-                isinstance(review, dict) and review.get("valid_question") is False
-            ):
-                method = "普通排盘"
-            if trace is not None:
-                method = "管理员调试起卦"
-                await trace.step(
-                    "随机起卦请求",
-                    {
-                        "调用": "_prepare_cast",
-                        "方式": "随机六爻",
-                        "question": question,
-                        "intent": intent,
-                        "method": method,
-                        "enforce_frequency": False,
-                        "enforce_question": False,
-                        "enforce_duplicate": False,
-                        "persist": False,
-                        "Token": 0,
-                    },
-                )
-            cast, cast_error = original_cast, ""
-            if original is None:
-                cast, cast_error = await self._prepare_cast(
-                    event,
-                    None,
-                    question=question,
-                    intent=intent,
-                    method=method,
-                    enforce_frequency=False,
-                    enforce_question=False,
-                    enforce_duplicate=False,
-                    persist=trace is None,
-                )
-            if cast_error:
-                if lease and not lease.error:
-                    await lease.release()
-                return cast_error
-
-            if trace is not None:
-                await trace.step(
-                    "排盘结果",
-                    {
-                        "六爻（自下而上）": cast.lines,
-                        "动爻位置": cast.moving_lines,
-                        "本卦序号": cast.primary_number,
-                        "之卦序号": cast.changed_number,
-                        "起卦时间": cast.cast_at,
-                        "排盘快照": cast.chart,
-                        "Token": 0,
-                    },
-                )
-            if cast.cast_at is not None:
-                await self._bind_token_cast(token_run, cast)
-
             refusal = ""
             analysis = ""
             analysis_recordable = False
-            if no_question:
+            if chart_only:
+                refusal = "排盘已保存；未调用 AI，不参与反馈。可用 /六爻解卦 #编号 问题 补解。"
+            elif no_question:
                 refusal = NO_VALID_QUESTION_NOTICE
             elif lease.error:
                 refusal = lease.error
@@ -1257,6 +1354,8 @@ class LiuyaoPlugin(
                 )
             elif isinstance(review, dict) and not review["valid_question"]:
                 refusal = NO_VALID_QUESTION_NOTICE
+                if supplied_cast is None and original is None:
+                    method = "普通排盘"
             else:
                 chart_text = self.readings.render(
                     cast, intent=intent, question=question, method=method, for_agent=True
@@ -1283,9 +1382,6 @@ class LiuyaoPlugin(
                         interpretation_prompt,
                         trace=trace,
                     )
-                    # Keep the reservation through review and any failover; only
-                    # a usable interpretation consumes daily or gifted quota.
-                    await lease.commit()
                     analysis_recordable = True
                 except Exception as exc:
                     if trace is not None:
@@ -1310,19 +1406,31 @@ class LiuyaoPlugin(
                         "本地处理 Token": 0,
                     },
                 )
-            if trace is None and analysis_recordable and cast.cast_at is not None:
-                case_id, _, _ = await self._open_agent_case(
-                    event,
-                    cast,
-                    intent=intent,
-                    question=question,
-                    method=method,
-                    cast_at=cast.cast_at,
-                    track_agent=False,
-                    reuse_existing=original is not None,
-                )
-                if case_id:
-                    await self._save_case_analysis(event, case_id, analysis)
+            if attempt_started:
+                try:
+                    await self._finish_case_attempt(
+                        event,
+                        case_id,
+                        token_run,
+                        status="success" if analysis_recordable else "unavailable",
+                        question=question,
+                        analysis=analysis if analysis_recordable else "",
+                        reason=refusal or (analysis if not analysis_recordable else ""),
+                        intent=intent,
+                    )
+                    attempt_finished = True
+                except Exception:
+                    logger.exception("liuyao：解卦历史保存失败")
+                    refusal = (
+                        analysis + "\n" if analysis_recordable else ""
+                    ) + "本次解读历史保存失败，未扣本次额度；请联系管理员检查存储，原卦编号保留。"
+
+            if analysis_recordable and (attempt_finished or trace is not None):
+                try:
+                    await lease.commit()
+                except AIQuotaStorageError:
+                    logger.exception("liuyao：有效解卦已保存，但额度提交失败")
+                    refusal = analysis + "\n解读已保存，额度记录暂不可用，请联系管理员核对。"
 
             chart_status = await self._render_and_send_chart(
                 event,
@@ -1383,6 +1491,20 @@ class LiuyaoPlugin(
                 )
             return ""
         finally:
+            if attempt_started and not attempt_finished:
+                try:
+                    await self._finish_case_attempt(
+                        event,
+                        case_id,
+                        token_run,
+                        status="success" if analysis_recordable else "interrupted",
+                        question=question,
+                        analysis=analysis if analysis_recordable else "",
+                        reason="" if analysis_recordable else "请求中断，未完成有效解卦。",
+                        intent=intent,
+                    )
+                except Exception:
+                    logger.exception("liuyao：请求结束时保存解卦历史失败")
             try:
                 await lease.release()
             except AIQuotaStorageError:

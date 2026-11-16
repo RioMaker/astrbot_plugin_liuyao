@@ -89,7 +89,7 @@ def test_help_card_contains_all_commands_and_descriptions_without_clipping(tmp_p
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", record)
     path = LiuyaoTextCardRenderer().render_help(HELP_TEXT, output_path=tmp_path / "help.png")
     with Image.open(path) as image:
-        assert image.width == 1080 and 1000 < image.height < 2000
+        assert image.width == 1080 and 1800 < image.height < 3200
     combined = "".join(drawn).replace(" ", "")
     for line in HELP_TEXT.splitlines():
         for part in line.split("：", 1):

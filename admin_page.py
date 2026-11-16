@@ -13,7 +13,14 @@ from astrbot.api import logger
 
 if __package__:
     from .case_export import build_case_export
-    from .case_library import normalize_case_store, serialize_case_store
+    from .case_library import (
+        analysis_history,
+        feedback_closed,
+        feedback_eligible,
+        feedback_status,
+        normalize_case_store,
+        serialize_case_store,
+    )
     from .feedback_card import case_cast
     from .paipan import BEIJING
     from .renderer import ChartRenderError
@@ -21,7 +28,14 @@ if __package__:
     from .user_management import CASES_KEY, ManagementError, case_revision, require_text
 else:
     from case_export import build_case_export
-    from case_library import normalize_case_store, serialize_case_store
+    from case_library import (
+        analysis_history,
+        feedback_closed,
+        feedback_eligible,
+        feedback_status,
+        normalize_case_store,
+        serialize_case_store,
+    )
     from feedback_card import case_cast
     from paipan import BEIJING
     from renderer import ChartRenderError
@@ -186,12 +200,13 @@ class AdminPageMixin:
         search, page = self._page_options(query)
         cases = normalize_case_store(await self.get_kv_data(CASES_KEY, {}))
         state = query.get("state", "all")
-        if state not in {"all", "pending", "feedback"}:
+        if state not in {"all", "pending", "feedback", "unavailable"}:
             raise ManagementError("未知卦例筛选条件")
         sender = require_text(query.get("sender", ""), "用户编号", 128, empty=True)
         rows = []
         for case in cases:
-            feedback = any(f.get("valid") is not False for f in case.get("feedback", []))
+            feedback = feedback_closed(case)
+            eligible = feedback_eligible(case)
             text = " ".join(
                 str(case.get(k) or "")
                 for k in (
@@ -201,6 +216,7 @@ class AdminPageMixin:
                     "caster_name",
                     "group_id",
                     "question",
+                    "analysis_question",
                     "admin_note",
                 )
             )
@@ -208,7 +224,11 @@ class AdminPageMixin:
                 continue
             if sender and case.get("caster_id") != sender:
                 continue
-            if state != "all" and feedback != (state == "feedback"):
+            if (
+                (state == "pending" and not eligible)
+                or (state == "feedback" and not feedback)
+                or (state == "unavailable" and (feedback or eligible))
+            ):
                 continue
             rows.append(
                 {
@@ -220,11 +240,14 @@ class AdminPageMixin:
                         "caster_name",
                         "group_id",
                         "question",
+                        "analysis_question",
                         "created_at",
                     )
                 }
                 | {
                     "feedback_closed": feedback,
+                    "feedback_eligible": eligible,
+                    "feedback_status": feedback_status(case),
                     "primary_name": case.get("cast", {}).get("primary_name", ""),
                 }
             )
@@ -246,7 +269,7 @@ class AdminPageMixin:
         key = case_usage_key(case)
         runs = [r for r in await self._token_runs() if r["cast_key"] == key]
         return {
-            "case": case,
+            "case": {**case, "analysis_history": analysis_history(case)},
             "revision": case_revision(case),
             "token_usage": summarize(runs),
             "usage_id": key,

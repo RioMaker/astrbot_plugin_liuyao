@@ -7,7 +7,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from test_agent_analysis import ANALYSIS, QUESTION, prepare
+from test_agent_analysis import ANALYSIS, QUESTION, assert_original_preserved, prepare
 from test_permissions import _Event
 
 
@@ -70,7 +70,8 @@ def test_interpretation_failure_releases_quota_and_never_saves_prediction(failur
         assert used_count(plugin) == 0
         assert "今日已用：0 次，剩余：1 次" in await plugin._ai_quota_status(event)
         assert plugin.context.llm_generate.await_count == 2
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
         plugin._render_and_send_chart.assert_awaited_once()
         assert (
             "失败" in plugin._send_reply_payload.call_args.args[3]
@@ -111,7 +112,8 @@ def test_obvious_non_question_only_casts_without_models_or_quota(question, via_t
         plugin._render_and_send_chart.assert_awaited_once()
         assert plugin._render_and_send_chart.call_args.kwargs["method"] == "普通排盘"
         assert "cast_policy:20002" in plugin._test_store
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
         assert not any(key.startswith("ai_daily_quota_v1:") for key in plugin._test_store)
         assert "未识别到有效问题" in plugin._send_reply_payload.call_args.args[3]
         assert "今日已用：0 次，剩余：1 次" in await plugin._ai_quota_status(event)
@@ -139,7 +141,8 @@ def test_review_requires_an_explicit_valid_question_and_releases_quota(review, n
         plugin._render_and_send_chart.assert_awaited_once()
         assert notice in plugin._send_reply_payload.call_args.args[3]
         assert "不消耗 AI 解卦次数" in plugin._send_reply_payload.call_args.args[3]
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
         assert "今日已用：0 次，剩余：1 次" in await plugin._ai_quota_status(event)
 
     asyncio.run(run())
@@ -174,7 +177,9 @@ def test_failed_reuse_of_same_message_does_not_refund_previous_success():
         ]
         await plugin.reuse_liuyao_tool(event)
         assert used_count(plugin) == 1
-        assert plugin._test_store["liuyao_case_library"] == cases
+        assert_original_preserved(
+            plugin._test_store["liuyao_case_library"]["cases"][0], cases["cases"][0]
+        )
         assert "今日已用：1 次，剩余：0 次" in await plugin._ai_quota_status(event)
 
     asyncio.run(run())
@@ -201,7 +206,8 @@ def test_cancellation_during_models_releases_quota(stage):
         with pytest.raises(asyncio.CancelledError):
             await task
         assert "今日已用：0 次，剩余：1 次" in await plugin._ai_quota_status(event)
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
 
     asyncio.run(run())
 
@@ -230,7 +236,9 @@ def test_failed_request_releases_gift_without_refunding_previous_success(failure
         await plugin.reuse_liuyao_tool(event)
         assert used_count(plugin) == 1
         assert await plugin._gift_remaining(event) == 1
-        assert plugin._test_store["liuyao_case_library"] == cases
+        assert_original_preserved(
+            plugin._test_store["liuyao_case_library"]["cases"][0], cases["cases"][0]
+        )
         assert "剩余：0 +1 次" in await plugin._ai_quota_status(event)
 
         event.message_obj.message_id = "successful-gift-retry"
@@ -293,7 +301,7 @@ def test_quota_storage_failure_does_not_call_a_model():
 
 def test_concurrent_tools_reserve_only_one_ai_use_but_all_still_send_charts():
     async def run():
-        plugin, _ = prepare(limit=1, library=False)
+        plugin, _ = prepare(limit=1)
         events = [_Event("member") for _ in range(6)]
         for index, event in enumerate(events):
             event.message_obj.message_id = str(index)

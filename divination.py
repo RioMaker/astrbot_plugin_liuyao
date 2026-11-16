@@ -165,27 +165,19 @@ def split_manual_payload(payload: str) -> tuple[str, str]:
     """Split a command tail into the six-line expression and remaining text."""
 
     text = (payload or "").strip()
-    compact = re.match(r"^([6789]{6})(?:\s+(.*))?$", text)
-    if compact:
-        return compact.group(1), (compact.group(2) or "").strip()
-
-    tokens = text.split()
-    if len(tokens) >= 6:
-        candidate = " ".join(tokens[:6])
+    tokens = list(re.finditer(r"[^\s,，、/|;；]+", text))
+    for count in (1, 6):
+        if len(tokens) < count:
+            continue
+        end = tokens[count - 1].end()
+        if end < len(text) and not text[end].isspace():
+            continue
+        candidate = text[:end]
         try:
             parse_manual_cast(candidate)
         except ManualCastError:
-            pass
-        else:
-            return candidate, " ".join(tokens[6:]).strip()
-
-    # Six numeric lines may be separated by punctuation without spaces.
-    match = re.match(
-        r"^\s*([6789](?:\s*[,，、/|;；]\s*[6789]){5})(?:\s+(.*))?$",
-        text,
-    )
-    if match:
-        return match.group(1), (match.group(2) or "").strip()
+            continue
+        return candidate, text[end:].strip()
     raise ManualCastError("无法从指令中识别六爻；推荐格式：7 8 9 6 7 8")
 
 

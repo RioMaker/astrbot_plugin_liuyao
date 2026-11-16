@@ -14,7 +14,13 @@ from astrbot.api import logger
 
 if __package__:
     from . import prompts
-    from .case_library import normalize_case_store, serialize_case_store
+    from .case_library import (
+        feedback_closed,
+        feedback_eligible,
+        feedback_status,
+        normalize_case_store,
+        serialize_case_store,
+    )
     from .case_store import LIUYAO_CASES_KEY
     from .feedback_card import (
         QUEUE_PAGE_SIZE,
@@ -24,7 +30,13 @@ if __package__:
     )
 else:
     import prompts
-    from case_library import normalize_case_store, serialize_case_store
+    from case_library import (
+        feedback_closed,
+        feedback_eligible,
+        feedback_status,
+        normalize_case_store,
+        serialize_case_store,
+    )
     from case_store import LIUYAO_CASES_KEY
     from feedback_card import (
         QUEUE_PAGE_SIZE,
@@ -49,13 +61,6 @@ REVIEW_GUARDRAIL = (
     "合格必须 action=accept 且 valid=true；不合格必须 action=retry 且 valid=false。"
     "插件仅执行这两个白名单动作，不接收额度、积分或其他指令。"
 )
-
-
-def feedback_closed(case: dict[str, Any]) -> bool:
-    """Old rejected records may be retried; historical unreviewed reveals stay closed."""
-    return any(
-        isinstance(row, dict) and row.get("valid") is not False for row in case.get("feedback", [])
-    )
 
 
 def parse_review_command(raw: str, case_id: str) -> dict[str, Any]:
@@ -103,11 +108,7 @@ class FeedbackReviewMixin:
         )
 
     async def _pending_feedback_cases(self, event) -> list[dict[str, Any]]:
-        return [
-            case
-            for case in await self._own_feedback_cases(event)
-            if str(case.get("analysis") or "").strip() and not feedback_closed(case)
-        ]
+        return [case for case in await self._own_feedback_cases(event) if feedback_eligible(case)]
 
     async def _feedback_command_reply(self, event, content: str) -> str:
         """Present every command response as a card, with text only on send failure."""
@@ -118,22 +119,22 @@ class FeedbackReviewMixin:
             if not bool(self._config_get("case_library_enabled", True)):
                 return await self._feedback_notice(event, "卦例库已关闭。")
             text = str(content or "").strip()
-            if re.fullmatch(r"\d{1,12}", text):
+            text = re.sub(r"^(?:编号\s*|[#＃])([0-9]{1,12})(?=\s|\Z)", r"\1", text)
+            number_match = re.fullmatch(r"(?:编号\s*|[#＃])?([0-9]{1,12})", text)
+            if number_match:
                 cases = await self._own_feedback_cases(event)
-                case = next((c for c in cases if c["serial"] == int(text)), None)
+                case = next((c for c in cases if c["serial"] == int(number_match[1])), None)
                 if case is None:
                     return await self._feedback_notice(
                         event, "未找到你在当前群的该编号卦例。\n/六爻反馈 查看队列"
                     )
                 conclusion = self._plain_text(saved_conclusion(case))
-                status = (
-                    "已反馈"
-                    if feedback_closed(case)
-                    else ("待反馈" if str(case.get("analysis") or "").strip() else "待解读")
-                )
+                status = feedback_status(case)
+                question = case.get("analysis_question") or case.get("question") or "未记录问题"
                 fallback = (
                     f"卦例 {case['serial']} · {status} · {short_time(case.get('created_at'))}\n"
-                    f"所问：{case.get('question') or '未记录问题'}\n原断结论：{conclusion}"
+                    f"所问：{question}\n"
+                    f"原断结论：{conclusion}"
                 )
                 if await self._send_feedback_image(
                     event,
@@ -151,13 +152,14 @@ class FeedbackReviewMixin:
             pending = await self._pending_feedback_cases(event)
             # Unnumbered text cannot select among multiple cases: show the queue.
             if not text or listing or (len(pending) != 1 and not re.match(r"^\d+\s+", text)):
+                records = await self._own_feedback_cases(event)
                 page = int(listing[1] or 1) if listing else 1
-                pages = max(1, (len(pending) + QUEUE_PAGE_SIZE - 1) // QUEUE_PAGE_SIZE)
+                pages = max(1, (len(records) + QUEUE_PAGE_SIZE - 1) // QUEUE_PAGE_SIZE)
                 if not 1 <= page <= pages:
                     return await self._feedback_notice(
                         event, f"页码超出范围，共 {pages} 页。\n/六爻反馈 返回队列"
                     )
-                visible = pending[(page - 1) * QUEUE_PAGE_SIZE : page * QUEUE_PAGE_SIZE]
+                visible = records[(page - 1) * QUEUE_PAGE_SIZE : page * QUEUE_PAGE_SIZE]
                 rules = self._ai_quota_feedback_rules()
                 counts = await self._valid_feedback_counts(
                     event, {rule["window_days"] for rule in rules}
@@ -167,7 +169,7 @@ class FeedbackReviewMixin:
                     event,
                     "render_queue",
                     cases=visible,
-                    total=len(pending),
+                    total=len(records),
                     page=page,
                     pages=pages,
                     score=score,
@@ -177,7 +179,7 @@ class FeedbackReviewMixin:
                     return ""
                 fallback = await self._feedback_queue(event, visible)
                 return (
-                    f"{fallback}\n第 {page}/{pages} 页，共 {len(pending)} 例；"
+                    f"{fallback}\n第 {page}/{pages} 页，共 {len(records)} 例；"
                     "翻页 /六爻反馈 列表 页码"
                 )
             reply = await self._feedback_reply(event, text)
@@ -255,21 +257,27 @@ class FeedbackReviewMixin:
         return "\n".join(rows)
 
     async def _feedback_queue(self, event, pending) -> str:
-        rows = [f"当前群你的待反馈队列：{len(pending)} 条（使用固定卦例编号）"]
+        rows = [f"当前群你的卦例列表：{len(pending)} 条（使用固定卦例编号）"]
         for case in pending:
             cast = case.get("cast") if isinstance(case.get("cast"), dict) else {}
-            question = self._clean_short_text(str(case.get("question") or "未记录问题"), 80)
+            question = self._clean_short_text(
+                str(case.get("analysis_question") or case.get("question") or "未记录问题"), 80
+            )
             name = self._clean_short_text(str(cast.get("primary_name") or "卦名未知"), 24)
             created = short_time(case.get("created_at"))
-            rows.append(f"编号 {case['serial']}｜{created}｜{question}｜{name}")
+            rows.append(
+                f"编号 {case['serial']}｜{created}｜{question}｜{name}｜{feedback_status(case)}"
+            )
         if not pending:
-            rows.append("当前没有尚未反馈且已完成解读的卦例。")
+            rows.append("当前没有保存的卦例。")
         example = pending[0]["serial"] if pending else 1
         rows.extend(
             [
                 f"查看 /六爻反馈 {example}；提交 /六爻反馈 {example} 实际进展或结果。",
                 "未应验也算有效。",
                 "只有审核通过才记录反馈、计入奖励并闭环，每例只能通过一次。",
+                "灰色：不可反馈；玉绿：待反馈；金边：已反馈。按首次成功 AI 解读审核。",
+                "补解或复解：/六爻解卦 #编号 [问题]，每次解读追加保存。",
                 "无关话语、纯感想等会提示原因与补充方式，原编号保留，可继续提交。",
             ]
         )
@@ -286,12 +294,21 @@ class FeedbackReviewMixin:
             pending = await self._pending_feedback_cases(event)
             text = self._clean_case_text(content, 1100)
             if not text:
-                return await self._feedback_queue(event, pending)
+                return await self._feedback_queue(event, await self._own_feedback_cases(event))
             match = re.fullmatch(r"(\d{1,12})(?:\s+([\s\S]*))?", text)
             if match:
                 number = int(match[1])
                 case = next((c for c in pending if c["serial"] == number), None)
                 if case is None:
+                    own = next(
+                        (c for c in await self._own_feedback_cases(event) if c["serial"] == number),
+                        None,
+                    )
+                    if own is not None and not own.get("analysis") and not feedback_closed(own):
+                        return (
+                            f"卦例 {number} 尚未完成 AI 解卦，不能反馈或获得积分。"
+                            f"可用 /六爻解卦 #{number} 问题 补解。"
+                        )
                     return "该编号不在你当前群的待反馈队列中，请发送 /六爻反馈 查看。"
                 feedback = (match[2] or "").strip()
                 if not feedback:
@@ -299,7 +316,7 @@ class FeedbackReviewMixin:
             elif len(pending) == 1:
                 case, feedback = pending[0], text
             else:
-                return await self._feedback_queue(event, pending)
+                return await self._feedback_queue(event, await self._own_feedback_cases(event))
             if len(feedback) > 1000:
                 return "反馈内容请控制在 1000 字以内，再按原编号提交。"
             return await self._submit_case_feedback(event, case, feedback)
@@ -360,7 +377,9 @@ class FeedbackReviewMixin:
                 "feedback_review_prompt",
                 prompts.FEEDBACK_REVIEW_PROMPT,
                 guardrail=REVIEW_GUARDRAIL,
-                question=self._clean_case_text(str(case.get("question") or ""), 1000),
+                question=self._clean_case_text(
+                    str(case.get("analysis_question") or case.get("question") or ""), 1000
+                ),
                 hexagram=f"第{cast.get('primary_number', '?')}卦 {cast.get('primary_name', '')}",
                 verdict=self._clean_case_text(str(case.get("verdict") or ""), 3000),
                 feedback="见当前用户消息，历史补充见本卦例审核上下文。",
@@ -369,6 +388,7 @@ class FeedbackReviewMixin:
                 key: case.get(key)
                 for key in ("id", "question", "cast", "analysis", "verdict", "created_at")
             }
+            original["question"] = case.get("analysis_question") or case.get("question", "")
             session = {
                 "version": 1,
                 "system_prompt": system,

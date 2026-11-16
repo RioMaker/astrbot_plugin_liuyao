@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from test_agent_analysis import ANALYSIS, QUESTION, prepare
+from test_agent_analysis import ANALYSIS, QUESTION, assert_original_preserved, prepare
 from test_permissions import _make_enabled_plugin
 
 from token_usage import (
@@ -18,7 +18,7 @@ from token_usage import (
     summarize,
     usage_rows,
 )
-from user_management import ManagementError, case_revision
+from user_management import ManagementError
 
 
 def response(text=ANALYSIS, input_tokens=100, output_tokens=20):
@@ -142,7 +142,8 @@ def test_cast_tracks_review_interpretation_reuse_and_feedback_without_overwritin
         assert data["summary"]["total_tokens"] == 400
         assert data["summary"]["calls"] == 5
         assert data["summary"]["casts"] == 1
-        assert (await plugin._page_case(case_id, query={}))["case"] == original
+        current = await plugin._page_case(case_id, query={})
+        assert_original_preserved(current["case"], original)
         detail = await plugin._page_usage_detail(case_usage_key(case), query={})
         assert detail["record"]["serial"] == case["serial"]
         assert set(detail["stages"]) == {
@@ -154,7 +155,7 @@ def test_cast_tracks_review_interpretation_reuse_and_feedback_without_overwritin
         }
         # Case deletion and plugin reload must not decrease any token totals.
         await plugin._admin_change_case(
-            case_id, {"action": "delete", "revision": case_revision(case)}, "admin"
+            case_id, {"action": "delete", "revision": current["revision"]}, "admin"
         )
         reloaded = _make_enabled_plugin()
         reloaded.get_kv_data = plugin.get_kv_data
@@ -179,17 +180,20 @@ def test_rejected_reviews_are_counted_even_without_archived_case(library):
         ]
         await plugin._dispatch_liuyao(event, QUESTION)
         data = await plugin._page_usage(query={})
-        assert data["summary"]["casts"] == 1
-        assert data["summary"]["total_tokens"] == 120
-        assert not data["items"][0]["case_id"]
-        assert (await plugin._page_cases(query={}))["total"] == 0
+        assert data["summary"]["casts"] == int(library)
+        assert data["summary"]["total_tokens"] == (120 if library else 0)
+        if library:
+            assert data["items"][0]["case_id"]
+        else:
+            plugin.context.llm_generate.assert_not_awaited()
+        assert (await plugin._page_cases(query={}))["total"] == int(library)
 
     asyncio.run(run())
 
 
-def test_disabled_library_still_links_reuse_and_zero_ai_casts_are_distinct_from_legacy():
+def test_zero_ai_casts_are_distinct_from_legacy_and_preserve_usage():
     async def run():
-        plugin, event = prepare(library=False, limit=1)
+        plugin, event = prepare(limit=1)
         plugin.context.llm_generate.side_effect = [
             response('{"reject":false,"valid_question":true,"intent":"事业"}'),
             response(),

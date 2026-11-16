@@ -113,6 +113,7 @@ class LiuyaoTextCardRenderer:
         admin = next(row for row in entries if row[0].startswith("/六爻 开"))
         help_row = next(row for row in entries if row[0] == "/六爻")
         utilities = [row for row in entries if row[0] in {"/额度", "/ping"}]
+        manual = [row for row in entries if row[0].startswith(("/六爻排盘", "/六爻解卦", "时间="))]
         measure = ImageDraw.Draw(Image.new("RGB", (CARD_WIDTH, 1), PAPER))
 
         def wrap(value, size, width):
@@ -121,7 +122,16 @@ class LiuyaoTextCardRenderer:
         cast_description = wrap(cast[1], 25, CONTENT_WIDTH - 64)
         hero_height = 228 + len(cast_description) * 38
         alias_lines = wrap(f"{alias[1]} {alias[0]}", 22, CONTENT_WIDTH)
-        feedback_y = 190 + hero_height + 28 + len(alias_lines) * 34 + 42
+        manual_y = 190 + hero_height + 28 + len(alias_lines) * 34 + 42
+        manual_rows = []
+        for command, description in manual:
+            commands = wrap(command, 28, CONTENT_WIDTH - 56)
+            descriptions = wrap(description, 23, CONTENT_WIDTH - 56)
+            manual_rows.append(
+                (commands, descriptions, 30 + len(commands) * 40 + len(descriptions) * 34)
+            )
+        manual_height = sum(row[2] for row in manual_rows) + 20
+        feedback_y = manual_y + 62 + manual_height + 36
         feedback_left = MARGIN + 210
         feedback_width = CONTENT_RIGHT - feedback_left - 28
         feedback_rows = []
@@ -183,7 +193,15 @@ class LiuyaoTextCardRenderer:
         write(MARGIN + 116, bottom + 24, "/六爻 这个项目能按期完成吗", 28, PAPER)
         write_lines(MARGIN + 4, 190 + hero_height + 24, alias_lines, 22, 34, MUTED)
 
-        section(feedback_y, "02", "回看与反馈", "先查编号，再提交结果")
+        section(manual_y, "02", "手摇排盘与解卦", "六爻从初爻到上爻填写")
+        _panel(draw, manual_y + 62, manual_height, fill=PAPER_DEEP)
+        y = manual_y + 80
+        for commands, descriptions, row_height in manual_rows:
+            bottom = write_lines(MARGIN + 28, y, commands, 28, 40, JADE)
+            write_lines(MARGIN + 28, bottom + 2, descriptions, 23, 34)
+            y += row_height
+
+        section(feedback_y, "03", "回看与反馈", "首次原断用于反馈，每卦计分一次")
         top = feedback_y + 62
         _panel(draw, top, feedback_height, fill=JADE_PANEL)
         y = top
@@ -202,7 +220,7 @@ class LiuyaoTextCardRenderer:
         write(MARGIN + 28, y + 16, "示例  /六爻反馈 302 项目已按期完成", 26, JADE)
         write(MARGIN + 28, y + 57, "302 为示例编号，请替换为你列表中的实际编号。", 22, MUTED)
 
-        section(utilities_y, "03", "查询与管理", "按需使用")
+        section(utilities_y, "04", "查询与管理", "按需使用")
         for index, (command, descriptions) in enumerate(utility_rows):
             left = MARGIN + index * (utility_width + 20)
             top = utilities_y + 62

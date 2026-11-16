@@ -28,6 +28,7 @@ function installBridge() {
     created_at: "2026-10-25T09:40:53+08:00", question: "项目能按期完成吗？", feedback: [],
     cast: { lines: [7, 8, 9, 6, 7, 8], moving_lines: [3, 4], primary_name: "未济", changed_name: "蒙" },
   }));
+  state.cases = cases;
   function user() {
     return {
       id: "20002", name: "测试用户", cast_count: 1, groups: ["10001"],
@@ -304,3 +305,44 @@ for (const failure of [false, true]) {
     assert.deepEqual(errors, []);
   });
 }
+
+
+test("case states and complete reading history remain visible and escaped", async (t) => {
+  const { page, frame, errors } = await openPage(t);
+  await frame.evaluate(() => {
+    qa.cases[0].feedback_closed = true;
+    qa.cases[0].feedback_eligible = false;
+    qa.cases[0].feedback_status = "已反馈";
+    qa.cases[0].analysis = "首次原断";
+    qa.cases[0].analysis_question = "首次问题";
+    qa.cases[0].analysis_history = [1, 2].map((n) => ({
+      id: `run-${n}`, at: "2026-11-16T10:00:00+08:00", status: "success",
+      question: `第${n}次问题`, analysis: `第${n}次完整解读`, verdict: `第${n}次结论`,
+      provider: "provider-test", model: "<img src=x onerror=alert(1)>", calls: [],
+      usage: {total_tokens: 120, input_tokens: 100, output_tokens: 20, cached_tokens: 10, calls: 2, unknown_calls: 0, tracked: true},
+    }));
+    qa.cases[1].feedback_closed = false;
+    qa.cases[1].feedback_eligible = false;
+    qa.cases[1].feedback_status = "仅排盘 · 不可反馈";
+    qa.cases.push({...qa.cases[1], id: "LY-906", serial: 906, feedback_eligible: true, feedback_status: "待反馈"});
+  });
+  await frame.locator("#close-detail").click();
+  await frame.getByRole("button", {name: "卦例管理", exact: true}).click();
+  assert.equal(await frame.locator(".case-number.closed").textContent(), "#302");
+  assert.equal(await frame.locator(".case-number.unavailable").textContent(), "#905");
+  assert.equal(await frame.locator(".case-number.pending").textContent(), "#906");
+  const palette = await frame.locator(".case-number.closed").evaluate((el) => ({border: getComputedStyle(el).borderTopColor, background: getComputedStyle(el).backgroundColor}));
+  assert.deepEqual(palette, {border: "rgb(172, 135, 62)", background: "rgb(241, 228, 189)"});
+  if (process.env.LIUYAO_QA_OUTPUT) await page.screenshot({path: join(process.env.LIUYAO_QA_OUTPUT, "management-cases.png"), fullPage: true});
+  await frame.getByRole("button", {name: "查看卦例", exact: true}).first().click();
+  await frame.getByText("逐次解读记录", {exact: true}).waitFor();
+  const history = frame.locator(".section").filter({has: frame.getByText("逐次解读记录", {exact: true})});
+  assert.equal(await history.locator("details").count(), 2);
+  await history.locator("summary").first().click();
+  assert.match(await history.textContent(), /第1次结论/);
+  assert.match(await history.textContent(), /第2次完整解读/);
+  assert.match(await history.textContent(), /120/);
+  assert.equal(await history.locator("img").count(), 0);
+  if (process.env.LIUYAO_QA_OUTPUT) await page.screenshot({path: join(process.env.LIUYAO_QA_OUTPUT, "management-history.png"), fullPage: true});
+  assert.deepEqual(errors, []);
+});

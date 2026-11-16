@@ -117,7 +117,7 @@ def test_bare_command_lists_private_queue_rules_and_does_not_call_ai():
         }
         replies = [reply async for reply in plugin.liuyao_feedback_command(event, "")]
         text = replies[0]["text"]
-        assert "队列：2 条" in text and "编号 1｜" in text and "编号 7｜" in text
+        assert "列表：4 条" in text and "编号 1｜" in text and "编号 7｜" in text
         assert "编号 9｜" not in text and "编号 10｜" not in text
         assert "累计有效反馈：2 次" in text and "3天内反馈：1/3" in text
         assert "通过才记录" in text and "未应验也算有效" in text and "原编号保留" in text
@@ -196,7 +196,8 @@ def test_stable_numbers_do_not_shift_after_another_case_is_closed():
         plugin, event = setup(decision("case-3"), records=[case(3), case(9)])
         assert "已闭环" in await plugin._feedback_reply(event, "3 实际已经延期")
         queue = await plugin._feedback_reply(event, "")
-        assert "编号 9｜" in queue and "编号 3｜" not in queue
+        assert "编号 9｜" in queue and "编号 3｜" in queue
+        assert "已反馈" in queue and "待反馈" in queue
         assert "不在" in await plugin._feedback_reply(event, "1 这是队列第一条")
         assert len(plugin.context.calls) == 1
 
@@ -397,7 +398,7 @@ def test_no_provider_wrong_owner_disabled_library_and_missing_content_are_free()
         assert "请补充" in await plugin._feedback_reply(event, "1")
         assert "不在" in await plugin._feedback_reply(event, "9 无关")
         event.get_sender_id = lambda: "other-user"
-        assert "队列：0 条" in await plugin._feedback_reply(event, "")
+        assert "列表：0 条" in await plugin._feedback_reply(event, "")
         assert "未找到" in await plugin.record_liuyao_feedback_tool(event, "项目延期", case_id="1")
         event.get_sender_id = lambda: "20002"
 

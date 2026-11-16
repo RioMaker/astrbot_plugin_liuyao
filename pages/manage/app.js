@@ -196,12 +196,13 @@ function renderRows(items) {
       cells[3].append(node("span", item.banned ? "已封禁" : "正常", `badge${item.banned ? " banned" : ""}`));
       cells[5].append(button("管理用户", () => openUser(item.id), "link-button"));
     } else {
-      cells[0].append(node("div", `#${item.serial}`, "primary"), node("small", time(item.created_at)));
-      const question = node("div", item.question || "未记录问题", "question primary");
-      question.title = item.question;
+      const state = item.feedback_closed ? "closed" : item.feedback_eligible === false ? "unavailable" : "pending";
+      cells[0].append(node("span", `#${item.serial}`, `case-number ${state}`), node("small", time(item.created_at)));
+      const question = node("div", item.analysis_question || item.question || "未记录问题", "question primary");
+      question.title = item.analysis_question || item.question;
       cells[1].append(question, node("small", item.primary_name));
       cells[2].append(node("div", `${item.caster_name || "用户"} · ${item.caster_id}`), node("small", `群 ${item.group_id}`));
-      cells[3].append(node("span", item.feedback_closed ? "已反馈" : "待反馈", "badge"));
+      cells[3].append(node("span", item.feedback_status || (item.feedback_closed ? "已反馈" : "待反馈"), `badge ${state}`));
       cells[5].append(button("查看卦例", () => openCase(item.id), "link-button"));
     }
     cells[4].append(node("div", tokenText(item.token_usage, true), "primary"));
@@ -216,7 +217,7 @@ async function switchMode(next) {
     $(`tab-${tab}`).setAttribute("aria-pressed", String(tab === mode));
   }
   const options = mode === "users" ? [["all", "全部用户"], ["active", "正常使用"], ["banned", "已封禁"]]
-    : [["all", "全部卦例"], ["pending", "待反馈"], ["feedback", "已反馈"]];
+    : [["all", "全部卦例"], ["pending", "待反馈"], ["feedback", "已反馈"], ["unavailable", "不可反馈"]];
   $("state").replaceChildren(...select(options, "all").children);
   $("state").value = "all";
   $("state").parentElement.hidden = mode === "usage";
@@ -397,15 +398,29 @@ function openCase(id) {
     if (usage?.tracked) tokens.append(node("p", tokenBreakdown(usage), "help"), button("查看调用明细", () => openUsage(usage_id)));
     else tokens.append(node("p", "本卦尚无 Token 记录，旧版本的历史消耗无法补回。", "help"));
     body.append(tokens);
-    for (const [label, text] of [["所问", record.question], ["原断结论", record.verdict], ["完整解读", record.analysis]]) {
+    for (const [label, text] of [["排盘时所问", record.question], ["首次解卦问题", record.analysis_question || record.question], ["首次原断结论", record.verdict], ["首次完整解读", record.analysis]]) {
       const part = section(label); part.append(node("div", text || "未记录", "reading")); body.append(part);
     }
+    const history = section("逐次解读记录");
+    history.append(node("p", "反馈以首次成功解读为准，每卦只能获得一次反馈积分。历史日期、模型或用量缺失时不作推算。", "help"));
+    if (!(record.analysis_history || []).length) history.append(node("p", "尚无逐次解读记录。", "help"));
+    for (const row of [...(record.analysis_history || [])].reverse()) {
+      const detail = node("details"), label = {success: "成功", pending: "处理中 / 未完成", unavailable: "未完成", interrupted: "已中断"}[row.status] || row.status;
+      detail.append(node("summary", `${time(row.at)} · ${label} · ${row.model || row.provider || "模型未记录"}`));
+      detail.append(node("p", `问题：${row.question || "未记录"}`, "reading"));
+      detail.append(node("p", `结论：${row.verdict || "未保存独立结论"}`, "reading"));
+      detail.append(node("p", row.analysis || row.reason || "暂无正文", "reading"));
+      detail.append(node("p", `本次 Token（含预审与备用）：${row.usage ? tokenText(row.usage) + " · " + tokenBreakdown(row.usage) : "未知"}`, "help"));
+      for (const call of row.calls || []) detail.append(node("p", `${time(call.at)} · ${stageNames[call.stage] || call.stage} · ${call.provider} · ${call.model || "模型未报告"} · ${call.status} · 输入 ${call.usage?.input_tokens ?? "未知"} / 输出 ${call.usage?.output_tokens ?? "未知"} / 总计 ${call.usage?.total_tokens ?? "未知"} Token`, "help"));
+      history.append(detail);
+    }
+    body.append(history);
     const chart = section("原卦记录");
     chart.append(node("p", `六爻（初爻至上爻）：${(cast.lines || []).join("、")}；动爻：${(cast.moving_lines || []).join("、") || "无"}`, "help"));
     chart.append(caseChartPreview(id, record.serial));
     const raw = node("details"); raw.append(node("summary", "展开完整排盘数据"), node("pre", JSON.stringify(cast.chart || cast, null, 2), "reading")); chart.append(raw); body.append(chart);
     const feedback = section("实际反馈");
-    if (!(record.feedback || []).length) feedback.append(node("p", "尚未反馈", "help"));
+    if (!(record.feedback || []).length) feedback.append(node("p", record.analysis ? "尚未反馈" : "尚未完成 AI 解卦，不可反馈", "help"));
     for (const row of record.feedback || []) {
       feedback.append(node("p", `${time(row.observed_at)} · ${row.outcome || "未分类"}${row.valid === false ? " · 未通过" : ""}`, "help"), node("div", row.text || row.answer || "未记录正文", "reading"));
     }

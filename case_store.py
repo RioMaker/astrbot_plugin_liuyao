@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -11,7 +12,9 @@ from astrbot.api import logger
 
 try:
     from .case_library import (
+        analysis_history,
         extract_verdict,
+        feedback_closed,
         format_case_references,
         normalize_case_store,
         search_cases,
@@ -19,10 +22,13 @@ try:
         trim_cases,
     )
     from .najia import relatives_for_bits
-    from .paipan import chart_for
+    from .paipan import BEIJING, chart_for
+    from .token_usage import summarize
 except ImportError:  # pragma: no cover - direct local execution
     from case_library import (
+        analysis_history,
         extract_verdict,
+        feedback_closed,
         format_case_references,
         normalize_case_store,
         search_cases,
@@ -30,7 +36,8 @@ except ImportError:  # pragma: no cover - direct local execution
         trim_cases,
     )
     from najia import relatives_for_bits
-    from paipan import chart_for
+    from paipan import BEIJING, chart_for
+    from token_usage import summarize
 
 
 LIUYAO_CASES_KEY = "liuyao_case_library"
@@ -50,6 +57,9 @@ class LiuyaoCaseStoreMixin:
         cast_at: datetime,
         track_agent: bool = True,
         reuse_existing: bool = False,
+        execution_mode: str = "ai",
+        time_source: str = "automatic",
+        existing_case_id: str = "",
     ) -> tuple[str, str, str]:
         if not bool(self._config_get("case_library_enabled", True)):
             return "", "", "卦例库已由配置关闭。"
@@ -62,20 +72,20 @@ class LiuyaoCaseStoreMixin:
         caster_name, caster_id = self._caster_identity(event)
         try:
             async with self._case_lock_instance():
-                payload = await get_data(LIUYAO_CASES_KEY, {})
+                payload = copy.deepcopy(await get_data(LIUYAO_CASES_KEY, {}))
                 cases = normalize_case_store(payload)
                 if reuse_existing:
-                    for existing in cases:
+                    for existing in reversed(cases):
                         if (
                             existing.get("group_id") == group_id
                             and existing.get("caster_id") == caster_id
+                            and (not existing_case_id or existing.get("id") == existing_case_id)
                             and existing.get("created_at") == cast_at.isoformat()
                             and existing.get("cast", {}).get("lines") == list(cast.lines)
                         ):
                             # Keep the first prediction and its feedback queue intact.
                             await self._link_token_case(existing)
-                            case_id = "" if existing.get("analysis") else str(existing["id"])
-                            return case_id, "", "复用原卦例；已有原断保持不变。"
+                            return str(existing["id"]), "", "复用原卦例；后续解读追加保存。"
                 references = search_cases(
                     cases,
                     group_id=group_id,
@@ -99,11 +109,14 @@ class LiuyaoCaseStoreMixin:
                     caster_id=caster_id,
                 )
                 case["serial"] = serialize_case_store(cases, payload)["next_serial"]
+                case["token_key"] = "case-" + str(case["id"])
+                case["execution_mode"] = execution_mode
+                case["time_source"] = time_source
+                case["status"] = "chart_only" if execution_mode == "chart" else "awaiting_analysis"
                 cases.append(case)
-                maximum = self._bounded_config_int("case_library_max_records", 500, 20, 5000)
                 await put_data(
                     LIUYAO_CASES_KEY,
-                    serialize_case_store(trim_cases(cases, maximum), payload),
+                    serialize_case_store(self._trim_case_records(cases), payload),
                 )
                 await self._link_token_case(case)
             if not track_agent:
@@ -149,10 +162,11 @@ class LiuyaoCaseStoreMixin:
         intent_key = self.readings.normalize_intent(intent)
         timestamp = cast_at.isoformat()
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "id": f"LY-{cast_at.strftime('%Y%m%d')}-{uuid4().hex[:8]}",
             "created_at": timestamp,
             "updated_at": timestamp,
+            "recorded_at": datetime.now(BEIJING).isoformat(),
             "group_id": str(event.get_group_id() or "").strip(),
             "origin": str(getattr(event, "unified_msg_origin", "") or ""),
             "caster_id": caster_id,
@@ -186,6 +200,7 @@ class LiuyaoCaseStoreMixin:
                 "changed_relatives": [line.label for line in changed_relatives.lines],
             },
             "analysis": "",
+            "analysis_history": [],
             "answer": "",
             "verdict": "",
             "feedback": [],
@@ -198,34 +213,117 @@ class LiuyaoCaseStoreMixin:
         case_id: str,
         analysis: str,
     ) -> None:
-        get_data = getattr(self, "get_kv_data", None)
-        put_data = getattr(self, "put_kv_data", None)
-        if not callable(get_data) or not callable(put_data):
-            return
-        group_id = str(event.get_group_id() or "").strip()
+        run = self._new_token_run(event, kind="reuse")
+        await self._save_case_attempt(event, case_id, run, status="success", analysis=analysis)
+
+    def _trim_case_records(self, cases):
+        # Pure charts have their own allowance and cannot evict an AI case.
+        charts, readings = [], []
+        for case in cases:
+            target = charts if case.get("execution_mode") == "chart" else readings
+            target.append(case)
+        for bucket in (charts, readings):
+            bucket.sort(
+                key=lambda row: (
+                    str(
+                        row.get("retained_at")
+                        or row.get("recorded_at")
+                        or row.get("created_at")
+                        or ""
+                    ),
+                    row.get("serial", 0),
+                )
+            )
+        kept = {
+            row["id"]
+            for row in (
+                trim_cases(
+                    charts,
+                    self._bounded_config_int("case_library_max_chart_records", 500, 20, 5000),
+                )
+                + trim_cases(
+                    readings, self._bounded_config_int("case_library_max_records", 500, 20, 5000)
+                )
+            )
+        }
+        return [case for case in cases if case["id"] in kept]
+
+    async def _save_case_attempt(
+        self, event, case_id, run, *, status, question="", analysis="", reason="", intent=""
+    ) -> None:
+        """Append/update one request, preserving the first successful prediction forever."""
+        async with self._case_lock_instance():
+            payload = copy.deepcopy(await self.get_kv_data(LIUYAO_CASES_KEY, {}))
+            cases = normalize_case_store(payload)
+            case = next((row for row in cases if row["id"] == case_id), None)
+            if (
+                case is None
+                or str(case.get("caster_id", "")) != str(event.get_sender_id())
+                or str(case.get("group_id", "")) != str(event.get_group_id())
+            ):
+                raise ValueError("当前用户在本群的卦例不存在")
+            history = analysis_history(case)
+            at = datetime.now(BEIJING).isoformat()
+            entry = {
+                "id": run["id"],
+                "at": run["created_at"],
+                "updated_at": at,
+                "status": status,
+                "question": question or case.get("question", ""),
+                "analysis": analysis,
+                "verdict": extract_verdict(analysis),
+                "reason": reason,
+                "calls": copy.deepcopy(run.get("calls", [])),
+                "usage": summarize([run]),
+                "provider": run.get("interpretation_provider", ""),
+                "model": run.get("interpretation_model", ""),
+            }
+            position = next((i for i, row in enumerate(history) if row["id"] == run["id"]), None)
+            if position is None:
+                history.append(entry)
+                case["retained_at"] = at
+            else:
+                history[position] = entry
+            case["analysis_history"] = history
+            case["execution_mode"] = "ai"
+            if status == "success" and analysis and not str(case.get("analysis") or "").strip():
+                case.update(
+                    analysis=analysis,
+                    verdict=entry["verdict"],
+                    analysis_question=entry["question"],
+                    analysis_at=at,
+                    original_analysis_id=entry["id"],
+                )
+                if intent:
+                    case["intent"] = intent
+                    case["intent_label"] = str(self.readings.directions[intent]["label"])
+            case["status"] = (
+                "feedback_recorded"
+                if feedback_closed(case)
+                else "analyzed"
+                if case.get("analysis")
+                else "awaiting_analysis"
+                if status == "pending"
+                else "analysis_unavailable"
+            )
+            case["updated_at"] = at
+            await self.put_kv_data(
+                LIUYAO_CASES_KEY, serialize_case_store(self._trim_case_records(cases), payload)
+            )
+
+    async def _case_number(self, case_id):
+        return next(
+            (row["serial"] for row in await self._load_case_records() if row["id"] == case_id), 0
+        )
+
+    async def _finish_case_attempt(self, event, case_id, run, **values):
+        # Finish durable writes even when the caller was cancelled during a model request.
+        from_task = asyncio.create_task(self._save_case_attempt(event, case_id, run, **values))
         try:
-            async with self._case_lock_instance():
-                payload = await get_data(LIUYAO_CASES_KEY, {})
-                cases = normalize_case_store(payload)
-                matched = False
-                for case in cases:
-                    if (
-                        str(case.get("id") or "") == case_id
-                        and str(case.get("group_id") or "") == group_id
-                    ):
-                        case["analysis"] = analysis
-                        case["verdict"] = extract_verdict(analysis)
-                        case["updated_at"] = datetime.now().astimezone().isoformat()
-                        case["status"] = "feedback_recorded" if case.get("feedback") else "analyzed"
-                        matched = True
-                        break
-                if not matched:
-                    logger.warning("liuyao：待写入分析的卦例不存在：%s", case_id)
-                    return
-                await put_data(LIUYAO_CASES_KEY, serialize_case_store(cases, payload))
-            logger.info("liuyao：已自动保存卦例分析 %s", case_id)
-        except Exception as exc:
-            logger.exception("liuyao：保存卦例分析失败（%s）：%r", type(exc).__name__, exc)
+            await asyncio.shield(from_task)
+        except asyncio.CancelledError:
+            await from_task
+            raise
 
     async def _append_case_feedback(
         self,
@@ -286,6 +384,8 @@ class LiuyaoCaseStoreMixin:
                     eligible,
                     key=lambda item: str(item.get("created_at") or ""),
                 )
+                if not str(case.get("analysis") or "").strip():
+                    return "该卦尚未完成 AI 解卦，不能提交反馈或获得积分。"
                 rejected_rows = [
                     dict(item)
                     for item in case.get("feedback", [])

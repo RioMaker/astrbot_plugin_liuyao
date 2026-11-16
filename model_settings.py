@@ -70,6 +70,15 @@ class ModelSettingsMixin:
             analysis = self._plain_text(str(getattr(response, "completion_text", "") or "").strip())
             if getattr(response, "role", "") == "err" or analysis in {"", "Output stopped."}:
                 raise ValueError("模型未返回可用解读")
+            run["interpretation_provider"] = provider_id
+            run["interpretation_model"] = next(
+                (
+                    call.get("model", "")
+                    for call in reversed(run["calls"])
+                    if call["stage"] == stage
+                ),
+                "",
+            )
             return analysis
 
         try:

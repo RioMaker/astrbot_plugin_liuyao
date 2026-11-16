@@ -115,7 +115,7 @@ class CastPolicyMixin:
                             "intent": intent,
                             "method": method,
                             "lines": list(cast.lines),
-                            "timestamp": now,
+                            "timestamp": cast.cast_at.timestamp(),
                             "chart": cast.chart,
                             "group_id": str(event.get_group_id() or ""),
                         },
@@ -140,8 +140,8 @@ class CastPolicyMixin:
     @staticmethod
     def _new_cast_snapshot(cast, now):
         cast = cast if cast is not None else cast_instant()
-        cast = replace(cast, cast_at=datetime.fromtimestamp(now, BEIJING), chart=None)
-        return replace(cast, chart=build_chart(cast))
+        cast = replace(cast, cast_at=cast.cast_at or datetime.fromtimestamp(now, BEIJING))
+        return replace(cast, chart=cast.chart if cast.chart is not None else build_chart(cast))
 
     async def _reuse_cast(self, event, *, for_agent=False, question=""):
         error = await self._group_gate(event, "liuyao")

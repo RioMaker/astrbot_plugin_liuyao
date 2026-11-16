@@ -146,7 +146,10 @@ def test_failed_backup_stops_and_releases_daily_or_gift_reservation(gift, failur
         assert called_providers(plugin) == ["plugin-model", "primary-model", "backup-model"]
         assert used_count(plugin) == int(gift)
         assert await plugin._gift_remaining(event) == int(gift)
-        assert plugin._test_store.get("liuyao_case_library") == before
+        assert plugin._test_store["liuyao_case_library"]["cases"][:-1] == (before or {}).get(
+            "cases", []
+        )
+        assert not plugin._test_store["liuyao_case_library"]["cases"][-1]["analysis"]
         assert "不消耗 AI 解卦次数" in plugin._send_reply_payload.call_args.args[3]
         original = copy.deepcopy(plugin._test_store["cast_policy:20002"])
 
@@ -178,7 +181,8 @@ def test_failover_never_bypasses_review_failure_or_rejection(review):
         await plugin.cast_liuyao_tool(event, question=QUESTION)
         assert called_providers(plugin) == ["plugin-model"]
         assert used_count(plugin) == 0
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
 
     asyncio.run(run())
 
@@ -256,7 +260,8 @@ def test_cancellation_during_primary_or_backup_stops_further_calls(blocked_provi
         )
         assert used_count(plugin) == 0
         assert "今日已用：0 次，剩余：1 次" in await plugin._ai_quota_status(event)
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
 
     asyncio.run(run())
 
@@ -277,6 +282,7 @@ def test_failover_cannot_start_an_unrecorded_backup_call():
         await plugin.cast_liuyao_tool(event, question=QUESTION)
         assert called_providers(plugin) == ["plugin-model", "primary-model"]
         assert used_count(plugin) == 0
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
 
     asyncio.run(run())

@@ -388,7 +388,7 @@ def test_long_reply_is_sent_as_a_card(tmp_path, via_tool) -> None:
     plugin = _make_plugin(
         {
             "ai_daily_limit": 0,
-            "case_library_enabled": False,
+            "case_library_enabled": True,
             "command_reply_image_mode": "始终",
             "command_reply_max_chars": 280,
         },
@@ -419,7 +419,7 @@ def test_interpretation_prompt_carries_the_char_budget(tmp_path, via_tool) -> No
     plugin = _make_plugin(
         {
             "ai_daily_limit": 0,
-            "case_library_enabled": False,
+            "case_library_enabled": True,
             "command_reply_image_mode": "关闭",
             "command_reply_max_chars": 180,
         },
@@ -438,7 +438,7 @@ def test_card_failure_falls_back_to_plain_text(tmp_path, via_tool) -> None:
     plugin = _make_plugin(
         {
             "ai_daily_limit": 0,
-            "case_library_enabled": False,
+            "case_library_enabled": True,
             "command_reply_image_mode": "始终",
             "command_reply_max_chars": 280,
         },
@@ -463,7 +463,7 @@ def test_short_reply_stays_plain_text_when_mode_is_long_only(via_tool) -> None:
     plugin = _make_plugin(
         {
             "ai_daily_limit": 0,
-            "case_library_enabled": False,
+            "case_library_enabled": True,
             "command_reply_image_mode": "超长时",
             "command_reply_image_threshold": 200,
         },

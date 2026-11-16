@@ -136,7 +136,8 @@ def test_selected_provider_failure_keeps_chart_without_switching_models(stage, f
         assert "失败" in plugin._send_reply_payload.call_args.args[3] or (
             "预审暂不可用" in plugin._send_reply_payload.call_args.args[3]
         )
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
         assert used_count(plugin) == 0
 
     asyncio.run(run())
@@ -154,7 +155,8 @@ def test_missing_system_model_does_not_borrow_the_other_stage_model(review_model
         assert plugin.context.llm_generate.await_count == (1 if review_model else 0)
         assert used_count(plugin) == 0
         plugin._render_and_send_chart.assert_awaited_once()
-        assert "liuyao_case_library" not in plugin._test_store
+        assert len(plugin._test_store["liuyao_case_library"]["cases"]) == 1
+        assert not plugin._test_store["liuyao_case_library"]["cases"][0]["analysis"]
 
     asyncio.run(run())
 

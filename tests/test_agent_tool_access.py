@@ -122,7 +122,7 @@ def test_manual_command_still_runs_ai_review_and_interpretation_when_tools_disab
         plugin.config.update(
             agent_tools_enabled=False,
             ai_daily_limit=1,
-            case_library_enabled=False,
+            case_library_enabled=True,
         )
         plugin.context = SimpleNamespace(
             get_current_chat_provider_id=AsyncMock(return_value="local-test-model"),
@@ -146,7 +146,7 @@ def test_manual_command_still_runs_ai_review_and_interpretation_when_tools_disab
         assert "断语" in plugin._send_reply_payload.call_args.args[3]
         assert await plugin._dispatch_liuyao(event, "") == ""
         assert "image" in event.sent[-1]
-        assert "卦例库已由配置关闭" in await plugin._feedback_reply(event, "")
+        assert "待反馈" in await plugin._feedback_reply(event, "")
         closed = _Event("member")
         closed.get_group_id = lambda: "closed"
         assert "尚未开启" in await plugin._dispatch_liuyao(closed, "这个项目能否按期完成")
