@@ -452,17 +452,15 @@ class LiuyaoImageRenderer:
 
     def _draw_chart(self, draw, y, cast, chart, f):
         has_changes = bool(cast.moving_lines)
-        edges = (
-            (MARGIN, 154, 264, 420, 756, 840, WIDTH - MARGIN)
-            if has_changes
-            else (MARGIN, 210, 390, 630, 1030, WIDTH - MARGIN)
-        )
-        labels = ("爻位", "六神", "伏神", "本卦", "世应") + (("之卦",) if has_changes else ())
+        edges = (MARGIN, 154, 264, 420, 756, 840, WIDTH - MARGIN)
+        labels = ("爻位", "六神", "伏神", "本卦", "世应", "之卦" if has_changes else "")
         centers = [(left + right) / 2 for left, right in zip(edges[:-1], edges[1:], strict=True)]
-        primary_x = centers[3] - (150 if has_changes else 115)
+        primary_x = centers[3] - 150
         role_x = centers[4]
         draw.rounded_rectangle((MARGIN, y, WIDTH - MARGIN, y + 60), radius=7, fill=PANEL)
         for center, label in zip(centers, labels, strict=True):
+            if not label:
+                continue
             self._text(
                 draw,
                 center - draw.textlength(label, font=f["data"]) / 2,
