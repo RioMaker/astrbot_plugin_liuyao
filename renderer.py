@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +33,36 @@ ACCENT = "#B34F40"
 JADE = "#234A3B"
 PANEL = "#EAEEDF"
 RULE = "#D5DCCB"
+ASSET_DIR = Path(__file__).resolve().parent / "assets"
+TAIJI_PATH = ASSET_DIR / "taiji-landscape.png"
 
 
-def draw_taiji_logo(draw, x, y, *, width=52, height=50, color=JADE):
-    """Draw a round, antialiased yin-yang mark shared by all command titles."""
+@lru_cache(maxsize=16)
+def _taiji_bitmap(path: Path, size: int) -> Image.Image:
+    """Cache only small, immutable-by-convention title bitmaps."""
+    with Image.open(path) as source:
+        image = source.convert("RGBA")
+    bounds = image.getchannel("A").getbbox()
+    if bounds is None:
+        raise ValueError("Empty Taiji asset")
+    return image.crop(bounds).resize((size, size), Image.Resampling.LANCZOS)
+
+
+def draw_taiji_logo(canvas: Image.Image, x, y, *, width=52, height=50, color=JADE):
+    """Draw the landscape Taiji, with a geometric fallback for all card titles."""
     size = max(8, round(min(width, height)))
+    left, top = round(x + (width - size) / 2), round(y + (height - size) / 2)
+    if color == JADE:
+        try:
+            icon = _taiji_bitmap(TAIJI_PATH, size)
+        except (OSError, ValueError):
+            # Optional decoration must never prevent a report from being sent.
+            pass
+        else:
+            canvas.paste(icon, (left, top), icon)
+            return
+
+    draw = ImageDraw.Draw(canvas)
     scale = 4
     extent = size * scale
     mask = Image.new("L", (extent, extent), 0)
@@ -50,7 +76,6 @@ def draw_taiji_logo(draw, x, y, *, width=52, height=50, color=JADE):
         symbol.ellipse((extent / 2 - eye, cy - eye, extent / 2 + eye, cy + eye), fill=fill)
     symbol.ellipse((0, 0, edge, edge), outline=255, width=scale)
     mask = mask.resize((size, size), Image.Resampling.LANCZOS)
-    left, top = round(x + (width - size) / 2), round(y + (height - size) / 2)
     draw.ellipse((left, top, left + size - 1, top + size - 1), fill=PAPER)
     draw.bitmap((left, top), mask, fill=color)
 
@@ -96,10 +121,10 @@ TRIGRAM_IMAGES = {
     "艮": "山",
     "坤": "地",
 }
-FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+FONT_DIR = ASSET_DIR / "fonts"
 BUNDLED_FONT_PATH = FONT_DIR / "NotoSansCJKsc-Regular.otf"
 TITLE_FONT_PATH = FONT_DIR / "LiuyaoEditorialSerif.otf"
-BAMBOO_PATH = FONT_DIR.parent / "bamboo.png"
+BAMBOO_PATH = ASSET_DIR / "bamboo.png"
 
 
 class ChartRenderError(RuntimeError):
@@ -302,7 +327,7 @@ class LiuyaoImageRenderer:
         canvas = Image.new("RGB", (WIDTH, height), PAPER)
         self._draw_background(canvas)
         draw = ImageDraw.Draw(canvas)
-        self._draw_header(draw, primary, changed, cast, chart, cast_at, f)
+        self._draw_header(canvas, primary, changed, cast, chart, cast_at, f)
         y = 308
         draw.rounded_rectangle(
             (MARGIN, y, MARGIN + 78, y + question_height - 22), radius=6, fill=JADE
@@ -373,8 +398,9 @@ class LiuyaoImageRenderer:
             raise ChartRenderError(f"保存六爻信息图失败：{exc}") from exc
         return path
 
-    def _draw_header(self, draw, primary, changed, cast, chart, cast_at, f):
-        draw_taiji_logo(draw, MARGIN, 45, width=72, height=72)
+    def _draw_header(self, canvas, primary, changed, cast, chart, cast_at, f):
+        draw_taiji_logo(canvas, MARGIN, 45, width=72, height=72)
+        draw = ImageDraw.Draw(canvas)
         self._text(draw, MARGIN + 100, 45, "六爻排盘", f["title"], JADE)
         stamp = cast_at.strftime("%Y-%m-%d %H:%M:%S") if cast_at else "原起卦时间未知"
         zone = "北京时间 UTC+8" if cast_at and cast_at.tzinfo else "原时间未注明时区"

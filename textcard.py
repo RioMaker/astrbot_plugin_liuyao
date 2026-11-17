@@ -174,7 +174,7 @@ class LiuyaoTextCardRenderer:
             write(MARGIN + 53, y, label, 32, JADE)
             _text_right(draw, CONTENT_RIGHT, y + 8, hint, self._font(21), MUTED)
 
-        draw_taiji_logo(draw, MARGIN, 63, width=64, height=64)
+        draw_taiji_logo(canvas, MARGIN, 63, width=64, height=64)
         write(MARGIN + 90, 63, lines[0], 46, JADE)
         write(MARGIN + 92, 126, "先起卦，再回看，有结果后回来反馈", 23, MUTED)
 
@@ -313,7 +313,7 @@ class LiuyaoTextCardRenderer:
         draw = ImageDraw.Draw(canvas)
         _draw_frame(draw, height)
 
-        self._draw_header(draw, headline=headline, subtitle=subtitle, meta=meta)
+        self._draw_header(canvas, headline=headline, subtitle=subtitle, meta=meta)
 
         y = _TOP_PAD + 92 + 30
         if question_lines:
@@ -385,11 +385,10 @@ class LiuyaoTextCardRenderer:
             raise ChartRenderError(f"保存六爻解卦笺失败：{exc}") from exc
         return path
 
-    def _draw_header(
-        self, draw: ImageDraw.ImageDraw, *, headline: str, subtitle: str, meta: str
-    ) -> None:
+    def _draw_header(self, canvas: Image.Image, *, headline: str, subtitle: str, meta: str) -> None:
         top = _TOP_PAD
-        draw_taiji_logo(draw, MARGIN, top + 8, width=76, height=76)
+        draw_taiji_logo(canvas, MARGIN, top + 8, width=76, height=76)
+        draw = ImageDraw.Draw(canvas)
 
         title_font = self._font(SIZES["title"], heading=True)
         _text(draw, MARGIN + 116, top + 2, headline, title_font, JADE)

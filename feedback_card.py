@@ -136,7 +136,7 @@ class LiuyaoFeedbackCardRenderer:
         canvas = Image.new("RGB", (WIDTH, height), PAPER)
         draw_bamboo_background(canvas, WIDTH)
         draw = ImageDraw.Draw(canvas)
-        draw_taiji_logo(draw, MARGIN, 49)
+        draw_taiji_logo(canvas, MARGIN, 49)
         self._text(draw, MARGIN + 78, 49, title, 46, JADE)
         if meta:
             draw.text((WIDTH - MARGIN, 64), meta, font=self._font(24), fill=MUTED, anchor="rt")
