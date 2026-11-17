@@ -1,6 +1,6 @@
 # astrbot_plugin_liuyao
 
-<p align="center"><img src="logo.png" alt="六爻起卦 Logo：玉环与六道阴阳爻，朱红圆点点题动爻" width="160" height="160"></p>
+<p align="center"><img src="logo.png" alt="六爻起卦 Logo：旅卦六爻内嵌半透明山水" width="160" height="160"></p>
 
 面向 QQ 群（OneBot v11 / aiocqhttp）的六爻起卦插件。默认 `/六爻 <内容>` 随机起卦，经 AI 预审分类后解读；支持手摇结果排盘、按编号解卦与反馈。`/六爻 开` 和 `/六爻 关` 控制当前群。
 

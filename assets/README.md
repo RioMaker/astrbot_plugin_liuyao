@@ -2,22 +2,29 @@
 
 ## 插件 Logo
 
-根目录的 [`logo.png`](../logo.png) 是六爻起卦插件的方形图标，2026-11-17 使用内置 imagegen 工具生成，保留原始 PNG。主体是玉环与六道阴阳爻，朱红圆点呼应动爻；不含文字，便于用作插件列表图标和头像。配色沿用排盘渲染器的玉绿 `#234A3B`、米白 `#F6F3EA` 和朱红 `#B34F40`。
+根目录的 [`logo.png`](../logo.png) 是六爻起卦插件的方形图标，2026-11-17 使用内置 imagegen 工具生成并按用户要求编辑，保留 1254 × 1254 原始 PNG。主体仅保留旅卦（上离下艮），去除外环、朱红圆点和其他装饰，将半透明山水效果嵌入六道爻线内部，阴爻断口与爻间留白保持干净。配色沿用排盘渲染器的玉绿 `#234A3B` 与米白 `#F6F3EA`；背景不透明，山水半透体现为图像内的叠色效果。
 
-生成后检查了方形尺寸、完整六爻、图形留白和文件可读性；README 引用同一文件。此图标为视觉标识，不作为实际排盘结果。
+依据 `data/zhouyi.json` 的第 56 卦核对爻序：自上而下为阳、阴、阳、阳、阴、阴（底向上的二进制为 `001101`）。已目视确认六爻结构、山水位于爻线内部及无外圈圆点，并检查方形尺寸、图形留白和文件可读性；README 引用同一文件。
 
-完整生成提示词：
+最终编辑提示词：
 
 ```text
-Use case: logo-brand.
-Asset type: finished square plugin logo for the Chinese Liuyao divination plugin 六爻起卦 in AstrBot, designed to remain clear at small avatar sizes.
-Primary request: create one elegant original emblem that combines an open jade circular ring with six yin-yang hexagram lines. The identity should feel calm, scholarly, contemporary Chinese, carefully proportioned and memorable.
-Scene/backdrop: uniform opaque warm rice-paper ivory #F6F3EA, no paper texture.
-Subject: a bold jade ring surrounds a centered vertical stack of EXACTLY SIX horizontal hexagram rows. From TOP to BOTTOM: 1 unbroken bar, 2 broken bar (two equal halves), 3 unbroken bar, 4 broken bar (two equal halves), 5 unbroken bar, 6 broken bar (two equal halves). All six rows have equal widths, consistent generous vertical spacing, moderately thick strokes with subtly softened corners, and crisp clear gaps. The stack must read as six separate lines, never five or seven. One small cinnabar red circular moving-line mark sits beside the fifth row and is integrated into a deliberate opening in the surrounding jade ring. The ring is a refined abstract jade bi-disc / coin reference, with a strong smooth silhouette and balanced white space.
-Style/medium: exceptionally polished flat vector-like logo artwork with precise geometry, restrained modern Eastern visual identity, no lettering.
-Composition/framing: 1:1 square canvas, a single centered large emblem occupying about 78 percent of the canvas, comfortable equal safe margins. The ring and hexagram must feel like one unified mark, with no overlap between ring and bars.
-Color palette: existing plugin colors only: deep jade green #234A3B for ring and all six rows, warm ivory #F6F3EA for background and negative space, muted cinnabar #B34F40 for the single small moving-line dot.
-Constraints: deliver only the standalone logo, no mockup, no brand presentation sheet, no variations, no text, no Chinese characters, no letters, no numbers, no watermark, no surrounding trigrams, no extra symbols, no bamboo decoration, no thin ornamental lines, no gradients, no shadows, no glow, no 3D, no metallic effects. Clean antialiased edges and a simple silhouette that works at 32 to 64 pixels.
+Use case: precise-object-edit.
+Asset type: finished square logo for the 六爻起卦 plugin.
+Input image: the existing plugin logo is the edit target.
+Primary request: redesign the provided logo as ONLY the Fire-over-Mountain hexagram 旅, with a subtle semi-transparent Chinese shanshui landscape embedded inside its six line shapes. Remove the surrounding circular ring and the red dot completely.
+Hexagram geometry is mandatory: exactly SIX horizontal rows, read from TOP to BOTTOM:
+Row 1: one continuous solid yang bar.
+Row 2: broken yin bar, two equal segments separated by a clean central gap.
+Row 3: one continuous solid yang bar.
+Row 4: one continuous solid yang bar.
+Row 5: broken yin bar, two equal segments separated by a clean central gap.
+Row 6: broken yin bar, two equal segments separated by a clean central gap.
+This is 旅 / ䷷, upper trigram Li (solid-broken-solid), lower trigram Gen (solid-broken-broken from top to bottom). Do not print these words, the symbol, or row numbers.
+Composition: a single large centered hexagram on a square canvas, around 76 percent of the canvas width and 68 percent of its height, generous equal outer margins. Six thick horizontal bars of identical overall width and thickness with consistent vertical spacing and subtly softened corners. All broken bars have an identical central gap. The hexagram itself is the entire logo.
+Landscape treatment: retain the original deep jade-green identity for the bars, and add a delicate, clearly visible translucent ink-wash mountain-and-water landscape over the jade fill at about 35–45 percent visual opacity. The mountains should form one continuous composition across the whole stack, with misty layered ridges above and a quiet lake below. Clip this landscape strictly INSIDE the six jade bar shapes: absolutely no landscape outside the bars, in the yin gaps, or in the spaces between rows. The landscape adds depth and poetic atmosphere while the dark jade silhouette of each bar remains crisp and easy to recognize.
+Preserve: warm ivory background #F6F3EA, jade-green base #234A3B, restrained elegant Chinese aesthetic, square canvas, smooth antialiased edges.
+Remove: the whole jade ring, red dot, border, seals, all text, numerals, ornaments, extra symbols, bamboo, people, buildings, boats, sun, moon, watermarks, mockups, presentation layouts. No new surrounding elements. No 3D, cast shadows, bevels, glow, or metallic effects. Only the correct six-line 旅 hexagram containing the semi-transparent landscape, on plain ivory.
 ```
 
 ## 排盘装饰素材
