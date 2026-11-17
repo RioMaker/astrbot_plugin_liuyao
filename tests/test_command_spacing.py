@@ -194,7 +194,7 @@ def test_compact_feedback_pagination(tail, page):
         args = plugin._send_feedback_image.call_args
         assert args.args[1] == "render_queue"
         assert args.kwargs["page"] == page
-        assert [record["serial"] for record in args.kwargs["cases"]] == [9, 10]
+        assert [record["serial"] for record in args.kwargs["cases"]] == [2, 1]
         assert not plugin.context.calls
 
     asyncio.run(run())

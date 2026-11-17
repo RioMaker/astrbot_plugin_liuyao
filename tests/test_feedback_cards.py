@@ -77,11 +77,11 @@ def test_queue_is_one_compact_image_with_reward_progress_and_cleanup():
         assert size[0] == 1240 and 400 < size[1] < 1600
         assert not path.exists()
         kind, values = plugin.feedback_card.calls[0]
-        assert kind == "queue" and [c["serial"] for c in values["cases"]] == [302, 905]
+        assert kind == "queue" and [c["serial"] for c in values["cases"]] == [905, 302]
         assert values["rules"][0]["count"] == 0
-        assert "看原卦：/六爻反馈 302" in plugin.feedback_card.texts
+        assert "看原卦：/六爻反馈 905" in plugin.feedback_card.texts
         assert "原断：将如期完成" in plugin.feedback_card.texts
-        assert any(text.startswith("交反馈：/六爻反馈 302 ") for text in plugin.feedback_card.texts)
+        assert any(text.startswith("交反馈：/六爻反馈 905 ") for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         assert "JSON" not in " ".join(plugin.feedback_card.texts)
 
@@ -101,8 +101,8 @@ def test_queue_shows_one_line_of_original_conclusion_without_analysis_or_model_c
         assert await command(plugin, event, "") == []
         conclusions = [text for text in plugin.feedback_card.texts if text.startswith("原断：")]
         assert len(conclusions) == 3
-        assert conclusions[0].endswith("…") and len(conclusions[0]) < len(long_verdict)
-        assert conclusions[1:] == ["原断：本月暂难落实。", "原断：未保存"]
+        assert conclusions[2].endswith("…") and len(conclusions[2]) < len(long_verdict)
+        assert conclusions[:2] == ["原断：未保存", "原断：本月暂难落实。"]
         assert not any("内部推导" in text for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
 
@@ -115,9 +115,9 @@ def test_queue_pagination_does_not_confuse_page_number_with_case_number():
         assert await command(plugin, event, "列表 2") == []
         kind, values = plugin.feedback_card.calls[0]
         assert kind == "queue" and values["page"] == 2 and values["total"] == 10
-        assert [c["serial"] for c in values["cases"]] == [9, 10]
-        assert "看原卦：/六爻反馈 9" in plugin.feedback_card.texts
-        assert any(text.startswith("交反馈：/六爻反馈 9 ") for text in plugin.feedback_card.texts)
+        assert [c["serial"] for c in values["cases"]] == [2, 1]
+        assert "看原卦：/六爻反馈 2" in plugin.feedback_card.texts
+        assert any(text.startswith("交反馈：/六爻反馈 2 ") for text in plugin.feedback_card.texts)
         assert not any("/六爻反馈 302" in text for text in plugin.feedback_card.texts)
         assert not plugin.context.calls
         await command(plugin, event, "列表 99")

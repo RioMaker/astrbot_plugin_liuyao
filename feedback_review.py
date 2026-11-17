@@ -105,6 +105,7 @@ class FeedbackReviewMixin:
                 and str(case.get("caster_id") or "") == str(event.get_sender_id() or "")
             ),
             key=lambda case: case["serial"],
+            reverse=True,
         )
 
     async def _pending_feedback_cases(self, event) -> list[dict[str, Any]]:
