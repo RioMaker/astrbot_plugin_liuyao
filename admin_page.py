@@ -99,6 +99,9 @@ class AdminPageMixin:
             ("manage/usage/<usage_id>", self._page_usage_detail, False),
             ("manage/models", self._page_models, False),
             ("manage/models/save", self._admin_save_models, True),
+            ("manage/reading-tests", self._page_reading_tests, False),
+            ("manage/reading-tests/start", self._admin_start_reading_test, True),
+            ("manage/reading-tests/<test_id>", self._page_reading_test, False),
         ):
             register(
                 f"/astrbot_plugin_liuyao/{route}",

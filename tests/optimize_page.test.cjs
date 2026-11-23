@@ -125,7 +125,7 @@ async function open(t, width = 1200, entry = "optimize") {
       contentType: "text/html", headers,
       body: readFileSync(join(root, "index.html"), "utf8").replace("<head>", "<head><script>(" + installBridge.toString() + ")();</script>"),
     });
-    if (["/app.js", "/controller.js", "/workshop-tab.js", "/style.css"].includes(path)) return route.fulfill({
+    if (["/app.js", "/controller.js", "/workshop-tab.js", "/reading-test.js", "/style.css"].includes(path)) return route.fulfill({
       contentType: path.endsWith(".js") ? "text/javascript" : "text/css", headers,
       body: readFileSync(join(root, path.slice(1)), "utf8"),
     });
@@ -142,7 +142,7 @@ test("the fourth management tab shows live rules and preserves drafts and pendin
   const { frame, errors } = await open(t, 1200, "manage");
   await frame.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
   const nav = frame.getByRole("navigation", { name: "管理分类" });
-  assert.deepEqual(await nav.getByRole("button").allTextContents(), ["用户管理", "卦例管理", "Token 统计", "解卦优化"]);
+  assert.deepEqual(await nav.getByRole("button").allTextContents(), ["用户管理", "卦例管理", "Token 统计", "解卦优化", "解卦测试"]);
   assert.equal(await frame.evaluate(() => reads.includes("optimize/state")), false);
   const tab = nav.getByRole("button", { name: "解卦优化" });
   await tab.click();

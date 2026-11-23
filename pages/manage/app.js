@@ -1,8 +1,10 @@
 import { mountWorkshop } from "./workshop-tab.js";
+import { mountReadingTests } from "./reading-test.js";
 
 const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
-const modes = ["users", "cases", "usage", "optimize"];
+const modes = ["users", "cases", "usage", "optimize", "reading-test"];
+let readingTests;
 let mode = "users", page = 1, pages = 1, generation = 0, busy = false;
 let detailGeneration = 0;
 const number = (value) => new Intl.NumberFormat("zh-CN").format(value || 0);
@@ -71,11 +73,11 @@ function button(text, callback, cls = "secondary") {
   result.addEventListener("click", callback);
   return result;
 }
-function grantRequestId() {
+function operationId() {
   // Unlike randomUUID(), getRandomValues() is also available on HTTP dashboards.
   const bytes = new Uint8Array(16);
   if (typeof globalThis.crypto?.getRandomValues !== "function") {
-    throw new Error("当前浏览器无法生成赠送操作编号，请更换浏览器后重试。");
+    throw new Error("当前浏览器无法生成操作编号，请更换浏览器后重试。");
   }
   globalThis.crypto.getRandomValues(bytes);
   return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
@@ -145,7 +147,7 @@ function openModels() {
   });
 }
 async function load() {
-  if (mode === "optimize") return;
+  if (mode === "optimize" || mode === "reading-test") return;
   const current = ++generation;
   $("refresh").disabled = true;
   $("count").textContent = "正在加载…";
@@ -226,9 +228,14 @@ async function switchMode(next) {
   }
   const workshop = $("optimize-panel");
   const optimizing = mode === "optimize";
-  $("management-list").hidden = $("records-footnote").hidden = $("refresh").hidden = optimizing;
+  const testing = mode === "reading-test";
+  $("management-list").hidden = $("records-footnote").hidden = $("refresh").hidden = optimizing || testing;
   workshop.hidden = !optimizing;
+  $("reading-test-panel").hidden = !testing;
+  if (testing && !readingTests) readingTests = mountReadingTests(bridge, time, operationId);
+  readingTests?.setActive(testing);
   notice("");
+  if (testing) { generation++; return; }
   if (optimizing) {
     // Discard a late list response and keep the discussion mounted between tab switches.
     generation++;
@@ -314,7 +321,7 @@ function openUser(id) {
       const noteText = note.value.trim(), signature = JSON.stringify([value, noteText]);
       mutate(() => {
         // Generate inside mutate so pre-request errors are visible and controls recover.
-        if (!operation || operation.signature !== signature) operation = { signature, id: grantRequestId() };
+        if (!operation || operation.signature !== signature) operation = { signature, id: operationId() };
         return bridge.apiPost(`manage/users/${encodeURIComponent(id)}/grant`, {
           amount: value, note: noteText, request_id: operation.id,
         });
@@ -471,10 +478,10 @@ function renderUsageRows(items) {
   for (const item of items) {
     const row = node("tr"), cells = Array.from({ length: 7 }, () => node("td")), usage = item.usage;
     if (view === "cases") {
-      const title = item.serial ? `卦例 #${item.serial}` : ({ debug: "管理员调试", ping: "模型检测", workshop: "解卦优化对话" }[item.kind] || "未留存卦例");
+      const title = item.serial ? `卦例 #${item.serial}` : ({ debug: "管理员调试", ping: "模型检测", workshop: "解卦优化对话", reading_test: "解卦测试" }[item.kind] || "未留存卦例");
       const question = node("div", item.question || title, "question"); question.title = item.question;
       cells[0].append(node("div", title, "primary"));
-      if (item.kind === "workshop") cells[0].append(node("small", `${time(item.created_at)} · 插件后台`));
+      if (["workshop", "reading_test"].includes(item.kind)) cells[0].append(node("small", `${time(item.created_at)} · 插件后台`));
       else cells[0].append(question, node("small", `${time(item.created_at)} · QQ ${item.caster_id} · 群 ${item.group_id || "无"}`));
       cells[6].append(button("调用明细", () => openUsage(item.id), "link-button"));
     } else if (view === "groups" || view === "users") {
@@ -507,7 +514,8 @@ function openUsage(id) {
     $("detail-title").textContent = record.serial ? `卦例 #${record.serial} · Token 消耗` : "Token 调用明细";
     const facts = node("div", "", "facts");
     facts.append(fact("累计 Token", tokenText(usage)), fact("模型调用", `${usage.calls} 次`), fact("用量未知", `${usage.unknown_calls} 次`));
-    body.append(facts, node("p", record.kind === "workshop" ? "插件后台 · 解卦优化对话" : `${record.question} · QQ ${record.caster_id} · 群 ${record.group_id || "无"}`, "help"));
+    const dashboardLabel = { workshop: "解卦优化对话", reading_test: "解卦测试" }[record.kind];
+    body.append(facts, node("p", dashboardLabel ? `插件后台 · ${dashboardLabel}` : `${record.question} · QQ ${record.caster_id} · 群 ${record.group_id || "无"}`, "help"));
     if (usage.historical && record.kind !== "ping") body.append(node("p", "仅包含启用记录后的调用，原卦的历史消耗未补记。", "help"));
     body.append(node("p", "预审、解卦、复解和反馈审核均累计到原卦。缓存输入已包含在输入和总量中。用量未知可能来自超时、取消、处理中或供应商未返回用量数据，不代表免费。", "help"));
     const stagesSection = section("按调用阶段汇总");

@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS versions (
     section TEXT NOT NULL, number INTEGER NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL,
     source TEXT NOT NULL, actor TEXT, change_id TEXT UNIQUE, PRIMARY KEY(section, number)
 );
+CREATE TABLE IF NOT EXISTS reading_tests (
+    id INTEGER PRIMARY KEY, actor TEXT NOT NULL, request_id TEXT NOT NULL, at TEXT NOT NULL,
+    source TEXT NOT NULL, serial INTEGER, question TEXT NOT NULL, status TEXT NOT NULL,
+    report TEXT NOT NULL, UNIQUE(actor, request_id)
+);
 """
 
 
@@ -109,6 +114,7 @@ class WorkshopHistory:
                 "UPDATE turns SET status='interrupted', active=0, reply='插件重载时本轮尚未完成。' "
                 "WHERE status='running'"
             )
+            db.execute("UPDATE reading_tests SET status='interrupted' WHERE status='running'")
 
     @contextmanager
     def connect(self):
@@ -117,7 +123,73 @@ class WorkshopHistory:
                 db.row_factory = sqlite3.Row
                 yield db
         except sqlite3.Error as exc:
-            raise ManagementError("优化记录读写失败，请检查插件数据目录后重试", 503) from exc
+            raise ManagementError("解卦管理记录读写失败，请检查插件数据目录后重试", 503) from exc
+
+    def existing_test(self, actor, request_id):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT id FROM reading_tests WHERE actor=? AND request_id=?", (actor, request_id)
+            ).fetchone()
+            return row["id"] if row else None
+
+    def start_test(self, actor, request_id, source, serial, question, report):
+        with self.connect() as db:
+            row = db.execute(
+                "INSERT INTO reading_tests (actor, request_id, at, source, serial, question, "
+                "status, report) VALUES (?, ?, ?, ?, ?, ?, 'running', ?) "
+                "ON CONFLICT(actor, request_id) DO NOTHING",
+                (
+                    actor,
+                    request_id,
+                    _now(),
+                    source,
+                    serial,
+                    question,
+                    json.dumps(report, ensure_ascii=False),
+                ),
+            )
+            if row.rowcount:
+                return row.lastrowid, True
+            return db.execute(
+                "SELECT id FROM reading_tests WHERE actor=? AND request_id=?", (actor, request_id)
+            ).fetchone()["id"], False
+
+    def save_test(self, test_id, status, report):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE reading_tests SET status=?, report=? WHERE id=? AND status='running'",
+                (status, json.dumps(report, ensure_ascii=False, default=str), test_id),
+            )
+
+    def list_tests(self, page):
+        with self.connect() as db:
+            return _page(
+                db,
+                "SELECT id, actor, at, source, serial, question, status",
+                "FROM reading_tests",
+                (),
+                "id",
+                page,
+            )
+
+    def stop_unfinished_test(self, test_id, status):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE reading_tests SET status=? WHERE id=? AND status='running'",
+                (status, test_id),
+            )
+
+    def test_detail(self, test_id):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT id, actor, at, source, serial, question, status, report "
+                "FROM reading_tests WHERE id=?",
+                (test_id,),
+            ).fetchone()
+            if not row:
+                raise ManagementError("找不到该解卦测试记录", 404)
+            result = dict(row)
+            return result | {"report": json.loads(result["report"])}
 
     def sync_versions(self, rules):
         """Finish interrupted approvals before recording other changes to the live config."""

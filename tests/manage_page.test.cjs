@@ -21,6 +21,7 @@ after(async () => { await browser?.close(); });
 function installBridge() {
   const state = window.qa = { balance: 0, posts: [], grants: [], failAfterSave: false, block: false, downloads: [], downloadError: "", blockDownload: false };
   state.previews = [];
+  state.testRuns = [];
   state.previewError = "";
   state.previewImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDAAAAABJRU5ErkJggg==";
   const cases = [302, 905].map((serial) => ({
@@ -39,7 +40,13 @@ function installBridge() {
   }
   window.AstrBotPluginPage = {
     ready: async () => ({}),
-    apiGet: async (endpoint) => {
+    apiGet: async (endpoint, query = {}) => {
+      if (endpoint === "optimize/cases") {
+        const selected = cases.filter((c) => !query.search || query.search === "#" + c.serial);
+        return { page: 1, pages: 1, items: selected.map((c) => ({ ...c, primary: c.cast.primary_name })) };
+      }
+      if (endpoint === "manage/reading-tests") return { page: 1, pages: 1, items: [...state.testRuns].reverse() };
+      if (endpoint.startsWith("manage/reading-tests/")) return state.testRuns.find((r) => r.id === Number(endpoint.split("/").pop()));
       if (endpoint === "manage/users/20002") return user();
       if (endpoint === "manage/users") return {
         items: [user()], page: 1, pages: 1, total: 1, stats: { users: 1, casts: 1, banned: 0 },
@@ -50,6 +57,18 @@ function installBridge() {
       throw new Error(`Unexpected endpoint: ${endpoint}`);
     },
     apiPost: async (endpoint, payload) => {
+      if (endpoint === "manage/reading-tests/start") {
+        state.posts.push({endpoint, ...payload});
+        const id = state.testRuns.length + 1;
+        state.testRuns.push({
+          ...payload, id, actor: "admin", at: "2026-11-23T10:00:00+08:00", status: "success",
+          report: { text: "完整解读正文", verdict: "可以签约。", steps: [{
+            title: "解卦模型调用", input_summary: "常用模型", output_summary: "可以签约。",
+            inputs: { request: { prompt: "全文第一行\n<原始提示词>" } }, outputs: { completion_text: "模型的原始回复" },
+          }] },
+        });
+        return { id };
+      }
       if (endpoint.endsWith("/render")) {
         state.previews.push({ endpoint, payload });
         if (state.blockPreview) await new Promise((resolve) => { state.resumePreview = resolve; });
@@ -98,7 +117,7 @@ async function openPage(t, protocol = "http") {
         "<head>", `<head><script>(${installBridge.toString()})();</script>`,
       ),
     });
-    if (["/app.js", "/workshop-tab.js", "/style.css"].includes(path)) return route.fulfill({
+    if (["/app.js", "/workshop-tab.js", "/reading-test.js", "/style.css"].includes(path)) return route.fulfill({
       contentType: path.endsWith(".js") ? "text/javascript" : "text/css", headers,
       body: readFileSync(join(pageRoot, path.slice(1)), "utf8"),
     });
@@ -121,6 +140,43 @@ async function waitNotice(frame, text, errors) {
     assert.fail(`${text}: ${errors.join("; ") || error.message}`);
   }
 }
+
+test("reading test tab runs all three sources and expands the original inputs and outputs", async (t) => {
+  const { page, frame, errors } = await openPage(t);
+  await frame.locator("#close-detail").click();
+  await page.setViewportSize({width: 390, height: 840});
+  await frame.getByRole("button", {name: "解卦测试", exact: true}).click();
+  await frame.getByLabel("查找卦例").fill("#905");
+  await frame.getByLabel("选择卦例").selectOption("905");
+  await frame.getByRole("button", {name: "开始测试"}).click();
+  const report = frame.locator("#test-report");
+  await report.getByRole("heading", {name: "测试 #1 · 已解卦"}).waitFor();
+  assert.equal(await report.getByText("模型的原始回复", {exact: true}).isVisible(), false);
+  await report.getByText("完整输入与输出", {exact: true}).click();
+  assert.match(await report.innerText(), /全文第一行\n<原始提示词>/);
+  assert.equal(await report.getByText("模型的原始回复", {exact: true}).isVisible(), true);
+  const select = frame.getByLabel("卦盘来源");
+  await select.selectOption("manual");
+  await frame.getByLabel("六爻（初爻到上爻）").fill("789678");
+  await frame.getByLabel("起卦时间（北京时间，可留空）").fill("2026-10-22T08:30");
+  await frame.getByLabel("测试问题").fill("能否按期完成？");
+  await frame.locator("#test-start").click();
+  await report.getByRole("heading", {name: "测试 #2 · 已解卦"}).waitFor();
+  await select.selectOption("random");
+  assert.match(await frame.getByLabel("测试问题").inputValue(), /本月底/);
+  await frame.locator("#test-start").click();
+  await report.getByRole("heading", {name: "测试 #3 · 已解卦"}).waitFor();
+  await frame.locator("#test-history-list button").last().click();
+  await report.getByRole("heading", {name: "测试 #1 · 已解卦"}).waitFor();
+  const posts = await frame.evaluate(() => qa.posts);
+  assert.deepEqual(posts.map((p) => p.source), ["case", "manual", "random"]);
+  assert.equal(posts[0].serial, "905");
+  assert.equal(posts[1].cast_at, "2026-10-22T08:30");
+  assert.equal(posts[1].lines, "789678");
+  assert.equal("serial" in posts[2] || "lines" in posts[2], false);
+  assert.equal(await frame.locator("#reading-test-panel").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true);
+  assert.deepEqual(errors, []);
+});
 
 for (const protocol of ["http", "https"]) {
   test(`${protocol.toUpperCase()} sandbox: grant button updates balance and history`, async (t) => {

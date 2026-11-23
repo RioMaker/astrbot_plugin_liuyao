@@ -63,6 +63,7 @@ except ImportError:  # pragma: no cover
 
 
 QUEUE_PAGE_SIZE = 8
+READINGS_PER_PAGE = 3
 CONTENT_WIDTH = WIDTH - 2 * MARGIN
 QUEUE_NUMBER_WIDTH = 134
 QUEUE_NUMBER_SIZE = 36
@@ -96,6 +97,44 @@ def saved_conclusion(case: dict[str, Any], *, fallback: str = "该卦例未保�
     # Never fall back to the analysis body: old cases may have no separate verdict.
     text = str(case.get("verdict") or "").strip() or extract_verdict(case.get("analysis", ""))
     return text or fallback
+
+
+def reading_history_page(case, page=1):
+    """Use identical saved entries and complete verdicts in the card and text fallback."""
+    history = analysis_history(case)
+    count = len(history)
+    pages = max(1, (count + READINGS_PER_PAGE - 1) // READINGS_PER_PAGE)
+    if not 1 <= page <= pages:
+        raise ValueError(f"结论页码超出范围，共 {pages} 页。")
+    lines = []
+    if count:
+        lines.append(f"解读记录 · 共 {count} 次 · 第 {page}/{pages} 页")
+    end = count - (page - 1) * READINGS_PER_PAGE
+    start = max(0, end - READINGS_PER_PAGE)
+    for i in reversed(range(start, end)):
+        row = history[i]
+        usage = row.get("usage") or {}
+        token_count = usage.get("total_tokens")
+        tokens = "未知" if token_count is None else str(token_count)
+        if token_count is not None and usage.get("unknown_calls"):
+            tokens += " + 未知"
+        model = row.get("model") or row.get("provider") or "模型未记录"
+        success = row.get("status") == "success"
+        label = "成功" if success else "未完成"
+        lines.extend(
+            [
+                f"第 {i + 1} 次 · {short_time(row.get('at'))} · {label} · {model} · Token {tokens}",
+                "问题：" + str(row.get("question") or "未记录"),
+                "结论：" + saved_conclusion(row, fallback="未保存独立结论")
+                if success
+                else "状态：" + str(row.get("reason") or "本次尚无结论"),
+            ]
+        )
+    if page > 1:
+        lines.append(f"较新记录 /六爻反馈 {case['serial']} 结论 {page - 1}")
+    if page < pages:
+        lines.append(f"更早记录 /六爻反馈 {case['serial']} 结论 {page + 1}")
+    return lines
 
 
 def case_cast(case: dict[str, Any]) -> CastResult:
@@ -275,6 +314,9 @@ class LiuyaoFeedbackCardRenderer:
             if cast.get("changed_name") and cast.get("moving_lines"):
                 names += " → " + str(cast["changed_name"])
             meta = short_time(case.get("created_at")) + " · " + names
+            total_readings = len(analysis_history(case))
+            if total_readings > 1:
+                meta += f" · {total_readings} 次解读"
             self._text(
                 draw,
                 x,
@@ -351,7 +393,9 @@ class LiuyaoFeedbackCardRenderer:
             self._text(draw, MARGIN, y + 94, "    ".join(navigation), 25, MUTED)
         return self._save(canvas, output_path)
 
-    def render_case(self, *, case, corpus, conclusion, status, output_path=None) -> Path:
+    def render_case(
+        self, *, case, corpus, conclusion, status, history_lines=None, output_path=None
+    ) -> Path:
         cast = case_cast(case)
         chart = chart_for(cast, cast.cast_at)
         question = self._lines(
@@ -364,27 +408,11 @@ class LiuyaoFeedbackCardRenderer:
         calendar = chart["calendar"]
         calendar_height = 176 if calendar.get("status") == "已计算" else 66
         conclusion_height = 94 + len(verdict) * 52
-        history = analysis_history(case)
-        history_lines = []
-        if history:
-            history_lines.append(f"解读记录 · 共 {len(history)} 次（最近 3 次）")
-            for row in history[-3:]:
-                usage = row.get("usage") or {}
-                total = usage.get("total_tokens")
-                tokens = (
-                    "未知"
-                    if total is None
-                    else str(total) + (" + 未知" if usage.get("unknown_calls") else "")
-                )
-                model = row.get("model") or row.get("provider") or "模型未记录"
-                label = "成功" if row.get("status") == "success" else "未完成"
-                values = [
-                    f"{short_time(row.get('at'))} · {label} · {model} · Token {tokens}",
-                    "问题：" + str(row.get("question") or "未记录"),
-                    "结论：" + str(row.get("verdict") or row.get("reason") or "未保存独立结论"),
-                ]
-                for value in values:
-                    history_lines.extend(self._lines(value, 24, CONTENT_WIDTH - 56, 2))
+        if history_lines is None:
+            history_lines = reading_history_page(case)
+        history_lines = [
+            line for value in history_lines for line in self._lines(value, 24, CONTENT_WIDTH - 56)
+        ]
         history_height = 48 + len(history_lines) * 36 if history_lines else 0
         height = (
             206 + question_height + calendar_height + 606 + conclusion_height + 178 + history_height

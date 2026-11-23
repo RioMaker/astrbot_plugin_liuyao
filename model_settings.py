@@ -37,12 +37,19 @@ class ModelSettingsMixin:
             if configured:
                 return configured, "管理员专用配置"
         configured = str(self._config_get(config_key, "") or "").strip()
-        return configured, "插件通用配置" if configured else "当前会话系统模型"
+        if configured:
+            return configured, "插件通用配置"
+        return "", "系统默认聊天模型" if event is None else "当前会话系统模型"
 
     async def _analysis_provider_id(self, event, config_key) -> str:
         configured, _source = self._analysis_provider_config(event, config_key)
         if configured:
             return configured
+        if event is None:
+            provider = self.context.get_using_provider()
+            if not provider:
+                raise RuntimeError("请配置通用预审、解卦模型或 AstrBot 默认聊天模型")
+            return provider.meta().id
         provider_id = await self.context.get_current_chat_provider_id(
             umo=str(getattr(event, "unified_msg_origin", "") or "")
         )
@@ -92,8 +99,11 @@ class ModelSettingsMixin:
                 raise
             logger.warning("liuyao：主解卦模型失败（%s），切换备用解卦模型", type(exc).__name__)
             if trace is not None:
-                await trace.step(
+                await trace.stage(
                     "解卦切换备用模型",
+                    primary_id or "未能取得主模型",
+                    {"主模型": primary_id, "error_type": type(exc).__name__},
+                    backup_id,
                     {
                         "主模型": primary_id or "未能取得主模型",
                         "备用模型": backup_id,

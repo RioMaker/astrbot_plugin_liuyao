@@ -186,6 +186,45 @@ def test_missing_verdict_never_falls_back_to_analysis_body():
     assert saved_conclusion({"analysis": "推理过程。\n断语：月底完成。"}) == "月底完成。"
 
 
+@pytest.mark.parametrize("fail_send", [False, True])
+def test_all_saved_verdicts_are_readable_across_pages_without_model_calls(fail_send):
+    async def run():
+        long = "以对方收到确认书为准。" * 16 + "完整结尾。"
+        history = [
+            {
+                "id": str(i),
+                "status": "success",
+                "question": f"第{i}个问题",
+                "analysis": f"内部分析不应展示\n断语：第{i}次的结论",
+                "verdict": "",
+            }
+            for i in range(1, 8)
+        ]
+        history[-1]["verdict"] = long
+        plugin, event = display_plugin(
+            records=[original_case(analysis_history=history)], fail_send=fail_send
+        )
+        initial = copy.deepcopy(saved(plugin, 302))
+        for page, wanted in [(1, [7, 6, 5]), (2, [4, 3, 2]), (3, [1])]:
+            plugin.feedback_card.texts.clear()
+            query = "302" if page == 1 else f"#302 结论 {page}"
+            replies = await command(plugin, event, query)
+            text = replies[0]["text"] if fail_send else "".join(plugin.feedback_card.texts)
+            assert all(f"第{i}个问题" in text for i in wanted)
+            assert all(f"第{i}次的结论" in text for i in wanted if i != 7)
+            if page == 1:
+                assert long in text
+            if page != 3:
+                assert f"/六爻反馈 302 结论 {page + 1}" in text
+            assert "内部分析不应展示" not in text
+            assert all(f"第{i}个问题" not in text for i in range(1, 8) if i not in wanted)
+        await command(plugin, event, "302 结论 4")
+        assert "共 3 页" in plugin.feedback_card.calls[-1][1]["text"]
+        assert not plugin.context.calls and saved(plugin, 302) == initial
+
+    asyncio.run(run())
+
+
 def test_submission_emits_one_final_image_without_extra_acknowledgement():
     async def run():
         plugin, event = display_plugin(decision("case-302"), records=[original_case()])

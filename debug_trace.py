@@ -15,7 +15,45 @@ else:
     from token_usage import summarize
 
 
-class DebugTrace:
+class AnalysisTrace:
+    """Capture only plugin request arguments, returned text and reported usage."""
+
+    async def begin_model(self, label, data):
+        await self.step(f"{label}请求", data)
+
+    async def end_model(self, label, data, *, failed=False):
+        await self.step(f"{label}{'调用异常' if failed else '响应'}", data)
+
+    async def stage(self, title, input_summary, inputs, output_summary, outputs):
+        await self.step(title, {"输入": inputs, **outputs})
+
+    async def error(self, title, exc):
+        # Provider exceptions can include credentials or entire HTTP requests.
+        safe_messages = {
+            "当前会话没有可用模型",
+            "请配置通用预审、解卦模型或 AstrBot 默认聊天模型",
+            "预审结果格式无效",
+            "预审结果不是 JSON 对象",
+            "预审结果缺少有效的 reject 字段",
+            "预审结果缺少有效的 valid_question 字段",
+            "预审模型未返回可用结果",
+            "模型未返回可用解读",
+        }
+        reason = str(exc) if str(exc) in safe_messages else "此阶段未能完成"
+        await self.stage(
+            title,
+            "上一步的请求或返回值",
+            {},
+            reason,
+            {
+                "error_type": type(exc).__name__,
+                "原因": reason,
+                "说明": "请结合前一步调用参数、模型响应及 AstrBot 日志定位。",
+            },
+        )
+
+
+class DebugTrace(AnalysisTrace):
     def __init__(self, event):
         self.event = event
         self.id = uuid4().hex[:8]
@@ -45,7 +83,7 @@ class DebugTrace:
                 group = "预审"
             elif title in {"随机起卦请求", "排盘结果"}:
                 group = "排盘"
-            elif title in {"解卦请求", "解卦响应", "解卦调用异常", "解卦处理失败"}:
+            elif title in {"解卦依据", "解卦请求", "解卦响应", "解卦调用异常", "解卦处理失败"}:
                 group = "解卦"
             elif title in {"权限与群开关", "问题与执行设置"}:
                 group = "输入与设置"
@@ -110,25 +148,6 @@ class DebugTrace:
                 except OSError as exc:
                     logger.warning("liuyao：清理调试卦图失败：%s", type(exc).__name__)
             self.images.clear()
-
-    async def error(self, title, exc):
-        # Provider exceptions may include credentials or whole HTTP requests.
-        safe_messages = {
-            "当前会话没有可用模型",
-            "预审结果格式无效",
-            "预审结果不是 JSON 对象",
-            "预审结果缺少有效的 reject 字段",
-            "预审模型未返回可用结果",
-            "模型未返回可用解读",
-        }
-        await self.step(
-            title,
-            {
-                "error_type": type(exc).__name__,
-                "原因": str(exc) if str(exc) in safe_messages else "此阶段未能完成",
-                "说明": "请结合前一步调用参数、模型响应及 AstrBot 日志定位。",
-            },
-        )
 
     async def finish(self, outcome, *, storage_warning=False):
         totals = summarize([{"calls": self.calls, "kind": "debug"}])
@@ -224,8 +243,8 @@ class DebugMixin:
                         model = str(provider.get_model())
                 except Exception:
                     pass
-            await trace.step(
-                f"{label}请求",
+            await trace.begin_model(
+                label,
                 {
                     "调用": "Context.llm_generate",
                     "stage": stage,
@@ -246,18 +265,19 @@ class DebugMixin:
             )
         except BaseException as exc:
             if trace is not None:
-                await trace.step(
-                    f"{label}调用异常",
+                await trace.end_model(
+                    label,
                     {
                         "error_type": type(exc).__name__,
                         "调用记录": trace.calls[before:],
                         "说明": "无用量字段表示尚未取得供应商报告，不代表零消耗。",
                     },
+                    failed=True,
                 )
             raise
         if trace is not None:
-            await trace.step(
-                f"{label}响应",
+            await trace.end_model(
+                label,
                 {
                     "role": str(getattr(response, "role", "") or ""),
                     "completion_text": str(getattr(response, "completion_text", "") or ""),

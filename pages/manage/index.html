@@ -23,6 +23,7 @@
         <button id="tab-cases" class="tab" aria-pressed="false">卦例管理</button>
         <button id="tab-usage" class="tab" aria-pressed="false">Token 统计</button>
         <button id="tab-optimize" class="tab" aria-controls="optimize-panel" aria-pressed="false">解卦优化</button>
+        <button id="tab-reading-test" class="tab" aria-controls="reading-test-panel" aria-pressed="false">解卦测试</button>
       </nav>
       <div id="management-list">
         <div id="usage-summary" hidden>
@@ -55,6 +56,35 @@
       </div>
       <section id="optimize-panel" aria-labelledby="tab-optimize" hidden>
         <p role="status">正在加载解卦优化…</p>
+      </section>
+      <section id="reading-test-panel" aria-labelledby="tab-reading-test" hidden>
+        <div class="test-layout">
+          <form id="test-form">
+            <h2>新建解卦测试</h2>
+            <p class="help">使用当前通用解卦配置，模型用量计入后台 Token 统计。报告仅供管理页查看。</p>
+            <label class="field">卦盘来源<select id="test-source">
+              <option value="case">指定卦例</option><option value="manual">手动排盘</option><option value="random">模拟起卦</option>
+            </select></label>
+            <div id="test-case-fields">
+              <label class="field">查找卦例<input id="test-search" type="search" maxlength="200" placeholder="输入 #编号、问题或卦名"></label>
+              <label class="field">选择卦例<select id="test-case" required></select></label>
+              <div class="pager"><button id="test-case-prev" type="button" class="secondary">上一页</button><span id="test-case-page"></span><button id="test-case-next" type="button" class="secondary">下一页</button></div>
+            </div>
+            <div id="test-manual-fields" hidden>
+              <label class="field">六爻（初爻到上爻）<input id="test-lines" maxlength="128" placeholder="例如 789678，或六组正反"></label>
+              <label class="field">起卦时间（北京时间，可留空）<input id="test-at" type="datetime-local" min="1900-01-01T00:00" max="2100-12-31T23:59"></label>
+            </div>
+            <label class="field">测试问题<textarea id="test-question" rows="3" maxlength="1000" placeholder="留空沿用所选卦例的问题"></textarea></label>
+            <button id="test-start" type="submit">开始测试</button>
+            <p id="test-notice" class="help" role="status"></p>
+          </form>
+          <section class="test-history">
+            <div class="test-heading"><h2>测试记录</h2><button id="test-refresh" type="button" class="secondary">刷新记录</button></div>
+            <div id="test-history-list"></div>
+            <div class="pager"><button id="test-prev" type="button" class="secondary">上一页</button><span id="test-page"></span><button id="test-next" type="button" class="secondary">下一页</button></div>
+          </section>
+        </div>
+        <section id="test-report" aria-label="测试报告"></section>
       </section>
     </section>
     <p id="records-footnote" class="footnote">历史用户从仍保留的卦例补录；此后每次成功起卦都会记录用户，包括没有 AI 解读的起卦。时间均为北京时间。</p>

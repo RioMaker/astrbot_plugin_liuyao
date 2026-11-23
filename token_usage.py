@@ -133,7 +133,7 @@ def summarize(runs) -> dict:
     result["casts"] = len({run["cast_key"] for run in runs if run.get("cast_key")})
     result["tracked"] = bool(runs)
     result["historical"] = bool(runs) and not any(
-        run.get("kind") in {"cast", "debug", "workshop"} for run in runs
+        run.get("kind") in {"cast", "debug", "workshop", "reading_test"} for run in runs
     )
     return result
 
@@ -176,7 +176,7 @@ def overview(runs, now):
 def usage_rows(runs, view):
     groups = {}
     for run in runs:
-        if run["kind"] == "workshop" and view in {"groups", "users"}:
+        if run["kind"] in {"workshop", "reading_test"} and view in {"groups", "users"}:
             continue  # Dashboard calls have no QQ user or group.
         if view in {"daily", "weekly", "monthly"}:
             for call in run["calls"]:
@@ -279,7 +279,7 @@ class TokenUsageMixin:
             cast_at=run["cast_at"],
             lines=cast.lines,
         )
-        if run.get("kind") == "debug":
+        if run.get("kind") in {"debug", "reading_test"}:
             run["cast_key"] = run["id"]
 
     async def _bind_token_cast(self, run, cast):

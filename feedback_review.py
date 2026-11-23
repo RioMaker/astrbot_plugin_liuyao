@@ -15,6 +15,7 @@ from astrbot.api import logger
 if __package__:
     from . import prompts
     from .case_library import (
+        analysis_history,
         feedback_closed,
         feedback_eligible,
         feedback_status,
@@ -25,12 +26,14 @@ if __package__:
     from .feedback_card import (
         QUEUE_PAGE_SIZE,
         LiuyaoFeedbackCardRenderer,
+        reading_history_page,
         saved_conclusion,
         short_time,
     )
 else:
     import prompts
     from case_library import (
+        analysis_history,
         feedback_closed,
         feedback_eligible,
         feedback_status,
@@ -41,6 +44,7 @@ else:
     from feedback_card import (
         QUEUE_PAGE_SIZE,
         LiuyaoFeedbackCardRenderer,
+        reading_history_page,
         saved_conclusion,
         short_time,
     )
@@ -121,7 +125,7 @@ class FeedbackReviewMixin:
                 return await self._feedback_notice(event, "卦例库已关闭。")
             text = str(content or "").strip()
             text = re.sub(r"^(?:编号\s*|[#＃])([0-9]{1,12})(?=\s|\Z)", r"\1", text)
-            number_match = re.fullmatch(r"(?:编号\s*|[#＃])?([0-9]{1,12})", text)
+            number_match = re.fullmatch(r"([0-9]{1,12})(?:\s+结论(?:\s*([0-9]{1,6}))?)?", text)
             if number_match:
                 cases = await self._own_feedback_cases(event)
                 case = next((c for c in cases if c["serial"] == int(number_match[1])), None)
@@ -129,6 +133,11 @@ class FeedbackReviewMixin:
                     return await self._feedback_notice(
                         event, "未找到你在当前群的该编号卦例。\n/六爻反馈 查看队列"
                     )
+                page = int(number_match[2] or 1)
+                try:
+                    history = reading_history_page(case, page)
+                except ValueError as exc:
+                    return await self._feedback_notice(event, str(exc))
                 conclusion = self._plain_text(saved_conclusion(case))
                 status = feedback_status(case)
                 question = case.get("analysis_question") or case.get("question") or "未记录问题"
@@ -144,9 +153,12 @@ class FeedbackReviewMixin:
                     corpus=self.corpus,
                     conclusion=conclusion,
                     status=status,
+                    history_lines=history,
                 ):
                     return ""
-                return fallback + "\n卦图暂不可用，请稍后重试。"
+                return "\n".join([fallback, *history, "卦图暂不可用，请稍后重试。"])
+            if re.match(r"^[0-9]{1,12}\s+结论(?=\s|[0-9])", text):
+                return await self._feedback_notice(event, "结论翻页格式：/六爻反馈 编号 结论 页码")
             listing = re.fullmatch(r"列表(?:\s*(\d{1,6}))?", text)
             if text.startswith("列表") and listing is None:
                 return await self._feedback_notice(event, "翻页格式：/六爻反馈 列表 2")
@@ -269,6 +281,9 @@ class FeedbackReviewMixin:
             rows.append(
                 f"编号 {case['serial']}｜{created}｜{question}｜{name}｜{feedback_status(case)}"
             )
+            if case.get("analysis"):
+                count = len(analysis_history(case))
+                rows.append(f"原断：{saved_conclusion(case, fallback='未保存')}（{count} 次解读）")
         if not pending:
             rows.append("当前没有保存的卦例。")
         example = pending[0]["serial"] if pending else 1
