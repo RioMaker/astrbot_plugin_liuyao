@@ -552,7 +552,7 @@ $("state").addEventListener("change", () => { page = 1; load(); });
 $("prev").addEventListener("click", () => { if (page > 1) { page--; load(); } });
 $("next").addEventListener("click", () => { if (page < pages) { page++; load(); } });
 try {
-  if (!bridge) throw new Error("请在 AstrBot WebUI → 插件 → 六爻起卦 → 用户与卦例管理 中打开此页面。");
+  if (!bridge) throw new Error("请从 AstrBot WebUI 侧栏打开「六爻起卦」。");
   await bridge.ready();
   $("export-cases").disabled = false;
   await load();

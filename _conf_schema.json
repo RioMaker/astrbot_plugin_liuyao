@@ -178,7 +178,7 @@
     "description": "AstrBot 管理员预审模型（留空继承通用设置）",
     "default": "",
     "_special": "select_provider",
-    "hint": "仅 AstrBot 管理员起卦、复解和 /六爻test 使用；QQ 群主或群管理员身份不生效。留空继承起卦预审模型，通用设置也留空时跟随当前会话系统模型。也可在用户与卦例管理页的“管理员模型”中保存。"
+    "hint": "仅 AstrBot 管理员起卦、复解和 /六爻test 使用；QQ 群主或群管理员身份不生效。留空继承起卦预审模型，通用设置也留空时跟随当前会话系统模型。也可从侧栏打开「六爻起卦」，在「管理员模型」中保存。"
   },
   "admin_interpretation_provider_id": {
     "type": "string",
@@ -237,7 +237,7 @@
     "type": "text",
     "description": "默认起卦 AI 解卦提示词",
     "default": "",
-    "hint": "在「用户与卦例管理」的「解卦优化」中可筛选卦例、逐项确认建议，查看优化记录和历版提示词全文。清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件会追加纯文本输出、专业边界和断语要求。",
+    "hint": "在「六爻起卦」的「解卦优化」中可筛选卦例、逐项确认建议，查看优化记录和历版提示词全文。清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件会追加纯文本输出、专业边界和断语要求。",
     "obvious_hint": true
   },
   "interpretation_general_rules": {

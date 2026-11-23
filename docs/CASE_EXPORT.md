@@ -2,7 +2,7 @@
 
 ## 文件与导出范围
 
-在 AstrBot WebUI → 插件 → 六爻起卦 → 用户与卦例管理，点击「导出全部卦例」。
+从 AstrBot WebUI 侧栏打开「六爻起卦」，点击「导出全部卦例」。
 下载文件名为 `liuyao_cases_YYYYMMDD_HHMMSS.zip`，时间采用北京时间（UTC+8）。
 解压后有两个 UTF-8 文件：
 

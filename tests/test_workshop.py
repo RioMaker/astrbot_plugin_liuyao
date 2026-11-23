@@ -366,9 +366,13 @@ def test_provider_failure_and_storage_failure_release_conversation(setup_worksho
 
 def test_workshop_discovery_and_config():
     locale = json.loads((ROOT / ".astrbot-plugin/i18n/zh-CN.json").read_text(encoding="utf-8"))
+    metadata = (ROOT / "metadata.yaml").read_text(encoding="utf-8").splitlines()
+    manage_title = locale["views"]["manage"]["title"]
+    assert locale["pages"]["manage"]["title"] == manage_title
+    assert f"display_name: {manage_title}" in metadata
     assert locale["views"]["optimize"] == locale["pages"]["optimize"]
     assert (ROOT / "pages/optimize/index.html").is_file()
-    assert f'version: "{PLUGIN_VERSION}"' in (ROOT / "metadata.yaml").read_text(encoding="utf-8")
+    assert f'version: "{PLUGIN_VERSION}"' in metadata
 
 
 def test_management_tab_ships_the_current_workshop():

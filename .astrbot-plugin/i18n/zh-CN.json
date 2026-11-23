@@ -1,7 +1,7 @@
 {
   "pages": {
     "manage": {
-      "title": "用户与卦例管理",
+      "title": "六爻起卦",
       "description": "管理用户与卦例、查看用量、优化解卦规则，并测试当前规则的实际解读。"
     },
     "optimize": {
@@ -11,7 +11,7 @@
   },
   "views": {
     "manage": {
-      "title": "用户与卦例管理",
+      "title": "六爻起卦",
       "description": "管理用户与卦例、查看用量、优化解卦规则，并测试当前规则的实际解读。"
     },
     "optimize": {
