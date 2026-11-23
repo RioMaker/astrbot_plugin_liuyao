@@ -5,7 +5,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { chromium } = require("playwright");
 
-const root = join(__dirname, "..", "pages", "optimize");
+const pages = join(__dirname, "..", "pages");
 let browser;
 before(async () => {
   browser = await chromium.launch({
@@ -29,9 +29,18 @@ function installBridge() {
     },
   };
   window.posts = [];
+  window.reads = [];
   window.AstrBotPluginPage = {
     ready: async () => {},
-    apiGet: async () => structuredClone(state),
+    apiGet: async (endpoint) => {
+      window.reads.push(endpoint);
+      if (endpoint === "optimize/state") return structuredClone(state);
+      const list = { items: [], page: 1, pages: 1, total: 0 };
+      if (endpoint === "manage/users") return { ...list, stats: { users: 0, banned: 0, casts: 0 } };
+      if (endpoint === "manage/cases") return { ...list, all_count: 0 };
+      if (endpoint === "manage/usage") return { ...list, overview: {}, summary: { casts: 0 } };
+      throw new Error("Unexpected endpoint " + endpoint);
+    },
     apiPost: async (endpoint, payload) => {
       window.posts.push({ endpoint, payload });
       if (endpoint === "optimize/chat") {
@@ -61,7 +70,8 @@ function installBridge() {
   };
 }
 
-async function open(t, width = 1200) {
+async function open(t, width = 1200, entry = "optimize") {
+  const root = join(pages, entry);
   const context = await browser.newContext({ viewport: { width, height: 850 } });
   t.after(() => context.close());
   const page = await context.newPage();
@@ -77,7 +87,7 @@ async function open(t, width = 1200) {
       contentType: "text/html", headers,
       body: readFileSync(join(root, "index.html"), "utf8").replace("<head>", "<head><script>(" + installBridge.toString() + ")();</script>"),
     });
-    if (path === "/app.js" || path === "/style.css") return route.fulfill({
+    if (["/app.js", "/controller.js", "/workshop-tab.js", "/style.css"].includes(path)) return route.fulfill({
       contentType: path.endsWith(".js") ? "text/javascript" : "text/css", headers,
       body: readFileSync(join(root, path.slice(1)), "utf8"),
     });
@@ -85,9 +95,65 @@ async function open(t, width = 1200) {
   });
   await page.goto("http://liuyao.test/");
   const frame = page.frames().find((f) => f.url().endsWith("/index.html"));
-  await frame.waitForFunction(() => !document.getElementById("composer").disabled);
+  if (entry === "manage") await frame.getByText("共 0 条记录", { exact: true }).waitFor();
+  else await frame.locator("#composer:not([disabled])").waitFor();
   return { frame, errors };
 }
+
+test("the fourth management tab shows live rules and preserves drafts and pending approvals", async (t) => {
+  const { frame, errors } = await open(t, 1200, "manage");
+  await frame.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+  const nav = frame.getByRole("navigation", { name: "管理分类" });
+  assert.deepEqual(await nav.getByRole("button").allTextContents(), ["用户管理", "卦例管理", "Token 统计", "解卦优化"]);
+  assert.equal(await frame.evaluate(() => reads.includes("optimize/state")), false);
+  const tab = nav.getByRole("button", { name: "解卦优化" });
+  await tab.click();
+  const panel = frame.getByRole("region", { name: "解卦优化", exact: true });
+  await panel.getByRole("heading", { name: "复盘对话" }).waitFor();
+  await panel.getByRole("heading", { name: "当前解卦逻辑" }).waitFor();
+  await panel.locator("#composer:not([disabled])").waitFor();
+  assert.equal(await tab.getAttribute("aria-pressed"), "true");
+  assert.equal(await frame.locator("#management-list").isVisible(), false);
+  await panel.getByLabel("本轮引用卦例库").check();
+  await panel.locator("#serials").fill("#233");
+  await panel.getByLabel("讨论内容").fill("请结合实际反馈复盘");
+  await panel.getByRole("button", { name: "发送", exact: true }).click();
+  const first = panel.locator(".proposal").first();
+  await first.waitFor();
+  assert.deepEqual(await first.locator(".comparison p").allTextContents(), ["原规则", "核实证据"]);
+  assert.equal(await panel.locator("#rule-text mark").innerText(), "原规则");
+  await panel.getByLabel("讨论内容").fill("还需要核实哪项证据？");
+  await nav.getByRole("button", { name: "卦例管理" }).click();
+  await frame.locator("#table-head").getByText("所问与卦象").waitFor();
+  assert.equal(await panel.isVisible(), false);
+  await nav.getByRole("button", { name: "Token 统计" }).click();
+  await frame.locator("#usage-summary").waitFor();
+  await tab.click();
+  assert.equal(await panel.getByLabel("讨论内容").inputValue(), "还需要核实哪项证据？");
+  assert.equal(await panel.locator("#rule-text").innerText(), "前文\n原规则\n后文");
+  assert.deepEqual(await frame.evaluate(() => posts.map((p) => p.endpoint)), ["optimize/chat"]);
+  await first.getByRole("button", { name: "确认采用此项" }).click();
+  await panel.getByText("已采用", { exact: true }).waitFor();
+  assert.equal(await panel.locator("#rule-text").innerText(), "前文\n核实证据\n后文");
+  assert.deepEqual(await frame.evaluate(() => posts[1].payload), { id: "s1", action: "approve" });
+  assert.equal(await frame.evaluate(() => reads.includes("manage/optimize")), false);
+  assert.deepEqual(errors, []);
+});
+
+test("the workshop tab and its jump to the current logic fit on a phone", async (t) => {
+  const { frame } = await open(t, 360, "manage");
+  const tab = frame.getByRole("button", { name: "解卦优化", exact: true });
+  const insideViewport = (element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth;
+  };
+  assert.equal(await tab.evaluate(insideViewport), true);
+  await tab.click();
+  await frame.getByRole("link", { name: "查看当前逻辑" }).click();
+  const rule = frame.locator("#rule-text");
+  assert.equal(await rule.evaluate((el) => el.matches(":focus")), true);
+  assert.equal(await rule.evaluate(insideViewport), true);
+});
 
 test("discussion, displayed source and exact preview precede independent approval", async (t) => {
   const { frame, errors } = await open(t);

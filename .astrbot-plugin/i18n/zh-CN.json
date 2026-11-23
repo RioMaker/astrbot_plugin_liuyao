@@ -2,7 +2,7 @@
   "pages": {
     "manage": {
       "title": "用户与卦例管理",
-      "description": "管理起卦用户、赠送额度、封禁与卦例记录。"
+      "description": "管理用户与卦例、查看 Token 用量，与模型复盘并逐项确认解卦规则。"
     },
     "optimize": {
       "title": "解卦优化",
@@ -12,7 +12,7 @@
   "views": {
     "manage": {
       "title": "用户与卦例管理",
-      "description": "管理起卦用户、赠送额度、封禁与卦例记录。"
+      "description": "管理用户与卦例、查看 Token 用量，与模型复盘并逐项确认解卦规则。"
     },
     "optimize": {
       "title": "解卦优化",

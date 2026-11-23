@@ -13,6 +13,7 @@ from test_permissions import ROOT
 from divination import CastResult
 from main import PLUGIN_VERSION, LiuyaoPlugin
 from prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_PROMPT
+from scripts.build_workshop_tab import TARGET, render_bundle
 from user_management import CASES_KEY, ManagementError
 
 PROMPT = "command_interpretation_prompt"
@@ -367,3 +368,7 @@ def test_workshop_discovery_and_config():
     assert locale["views"]["optimize"] == locale["pages"]["optimize"]
     assert (ROOT / "pages/optimize/index.html").is_file()
     assert f'version: "{PLUGIN_VERSION}"' in (ROOT / "metadata.yaml").read_text(encoding="utf-8")
+
+
+def test_management_tab_ships_the_current_workshop():
+    assert TARGET.read_text(encoding="utf-8") == render_bundle()

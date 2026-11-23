@@ -1,0 +1,272 @@
+export function startWorkshop(root, bridge) {
+  const $ = (id) => root.getElementById(id);
+  const statusNames = {
+    pending: "待确认", approved: "已采用", dismissed: "已放弃", stale: "原文已变化，请重新讨论",
+  };
+  let state;
+  let busy = false;
+
+  function element(tag, text = "", className = "") {
+    const result = document.createElement(tag);
+    result.textContent = text;
+    if (className) result.className = className;
+    return result;
+  }
+
+  function button(label, onClick, className = "") {
+    const control = element("button", label, className);
+    control.type = "button";
+    control.addEventListener("click", onClick);
+    return control;
+  }
+
+  function notice(message, error = false) {
+    const box = $("notice");
+    box.textContent = message;
+    box.hidden = !message;
+    box.classList.toggle("error", error);
+  }
+
+  function controls() {
+    $("refresh").disabled = busy;
+    $("new-chat").disabled = busy || !state?.turns.length;
+    $("reset-confirm").disabled = busy;
+    $("composer").disabled = busy || !state;
+    $("send").disabled = busy || !$("provider").value || !$("message").value.trim();
+    for (const control of root.querySelectorAll(".decision")) control.disabled = busy;
+  }
+
+  function renderRule(highlight = "") {
+    const key = $("section").value;
+    const rule = state?.sections[key];
+    if (!rule) return;
+    let scope = rule.editable
+      ? "解卦时使用此规则。对话建议经确认后生效。"
+      : "解卦请求中的只读资料，可在讨论时引用。";
+    const template = state.sections.command_interpretation_prompt;
+    if (template && !template.text.includes("{chart}") && key !== "command_interpretation_prompt" && key !== "guardrail") {
+      scope = "当前解卦提示词未包含 {chart}。将该变量加回提示词后，常规解卦才能收到本节内容。";
+    }
+    $("section-scope").textContent = scope;
+    const box = $("rule-text");
+    const at = highlight ? rule.text.indexOf(highlight) : -1;
+    if (at < 0) {
+      box.textContent = rule.text;
+      box.scrollTop = 0;
+      return;
+    }
+    const mark = element("mark", highlight);
+    box.replaceChildren(rule.text.slice(0, at), mark, rule.text.slice(at + highlight.length));
+    mark.scrollIntoView({ block: "nearest" });
+  }
+
+  function showSection(key, snippet, scroll = false) {
+    $("section").value = key;
+    renderRule(snippet);
+    if (scroll) {
+      $("logic").scrollIntoView({ block: "nearest" });
+      $("rule-text").focus({ preventScroll: true });
+    }
+  }
+
+  function proposal(change) {
+    const card = element("section", "", "proposal");
+    const head = element("div", "", "proposal-head");
+    head.append(element("h3", state.sections[change.section].label),
+      element("span", statusNames[change.status], "state " + change.status));
+    const diff = element("div", "", "comparison");
+    for (const [label, value] of [["修改前", change.before], ["建议改为", change.after || "（删除此段）"]]) {
+      const part = element("div");
+      part.append(element("strong", label), element("p", value, "message"));
+      diff.append(part);
+    }
+    const actions = element("div", "", "actions");
+    actions.append(button("查看所在章节", () => showSection(change.section,
+      change.status === "approved" ? change.after : change.before, true)));
+    if (change.status === "pending") {
+      actions.append(button("确认采用此项", () => decide(change, "approve"), "primary decision"),
+        button("放弃此项", () => decide(change, "dismiss"), "decision"));
+    }
+    card.append(head, element("p", change.reason, "reason"), diff, actions);
+    return card;
+  }
+
+  function sources(turn) {
+    if (!turn.cases.length) return element("small", "本轮未检索到有实际反馈的参考卦例。");
+    const details = element("details");
+    const ids = turn.cases.map((item) => "#" + item.serial).join("、");
+    details.append(element("summary", "本轮引用卦例 " + ids));
+    for (const item of turn.cases) {
+      const part = element("div", "", "source");
+      const evidence = [
+        item.chart, "原断：" + (item.reading || "未保存"), "断语：" + (item.verdict || "未保存"),
+        "实际反馈：" + (item.feedback.join(" / ") || "暂无"),
+      ];
+      if (item.answer) evidence.push("揭晓答案：" + item.answer);
+      part.append(element("strong", "#" + item.serial + " · " + (item.question || "未记录问题")),
+        element("p", evidence.join("\n"), "message"));
+      details.append(part);
+    }
+    return details;
+  }
+
+  function display(snapshot) {
+    const selected = $("section").value;
+    const oldTop = $("conversation").scrollTop;
+    state = snapshot;
+    const editable = element("optgroup"), fixed = element("optgroup");
+    editable.label = "可提出修改"; fixed.label = "只读资料";
+    for (const [key, rule] of Object.entries(state.sections)) {
+      (rule.editable ? editable : fixed).append(new Option(rule.label, key));
+    }
+    $("section").replaceChildren(editable, fixed);
+    $("section").disabled = false;
+    if (Object.hasOwn(state.sections, selected)) $("section").value = selected;
+    renderRule();
+    const log = $("conversation");
+    log.replaceChildren();
+    if (!state.turns.length) {
+      log.append(element("p", "可以从一次判断失准的经历开始，或贴入一段想复盘的对话。", "empty"));
+    }
+    for (const turn of state.turns) {
+      const entry = element("article", "", "turn");
+      entry.append(element("p", turn.message, "message ask"));
+      if (turn.use_cases) entry.append(sources(turn));
+      entry.append(element("div", turn.provider, "byline"), element("p", turn.reply, "message"));
+      for (const change of turn.changes) entry.append(proposal(change));
+      log.append(entry);
+    }
+    log.scrollTop = oldTop;
+    controls();
+  }
+
+  async function refresh() {
+    let data = await bridge.apiGet("optimize/state");
+    while (data.processing) {
+      display(data);
+      notice("模型仍在处理上一轮对话…");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      data = await bridge.apiGet("optimize/state");
+    }
+    const provider = $("provider");
+    const old = provider.value;
+    const available = data.providers;
+    provider.replaceChildren(new Option(available.length ? "请选择聊天模型" : "暂无可用的聊天模型", ""));
+    for (const item of available) {
+      provider.append(new Option(item.model && item.model !== item.id ? item.id + " · " + item.model : item.id, item.id));
+    }
+    const candidates = [old, data.preferred, available.length === 1 ? available[0].id : ""];
+    provider.value = candidates.find((id) => available.some((item) => item.id === id)) || "";
+    display(data);
+  }
+
+  async function run(operation, recover) {
+    if (busy) return;
+    busy = true;
+    controls();
+    try {
+      await operation();
+    } catch (error) {
+      // A lost POST response may have followed a successful save. Re-read server state.
+      try {
+        if (bridge && state) {
+          await refresh();
+          if (recover?.()) return;
+        }
+      } catch { /* Keep the last readable state. */ }
+      notice(error.message || "操作失败，请刷新后重试。", true);
+    } finally {
+      busy = false;
+      controls();
+    }
+  }
+
+  function readSerials() {
+    if (!$("use-cases").checked || !$("serials").value.trim()) return [];
+    const tokens = $("serials").value.trim().split(/[\s,，、]+/);
+    if (tokens.length > 3 || tokens.some((s) => !/^[#＃]?[0-9]{1,12}$/.test(s))) {
+      throw new Error("请输入最多 3 个卦例编号，用空格或逗号分隔。");
+    }
+    return tokens.map((s) => Number(s.replace(/^[#＃]/, "")));
+  }
+
+  async function send(event) {
+    event.preventDefault();
+    if (busy || $("send").disabled) return;
+    const message = $("message").value.trim();
+    const revision = state.revision;
+    const provider = $("provider").value;
+    function showReply(turn) {
+      $("message").value = "";
+      const first = turn.changes.find((c) => c.status === "pending");
+      if (first) showSection(first.section, first.before);
+      $("conversation").lastElementChild?.scrollIntoView({ block: "nearest" });
+      notice(first ? "建议已生成。请核对修改前后，再逐项确认。" : "已收到模型回复。");
+    }
+    await run(async () => {
+      const payload = {
+        revision, provider, message,
+        focus: $("section").value, use_cases: $("use-cases").checked, serials: readSerials(),
+      };
+      notice("模型正在复盘…");
+      const result = await bridge.apiPost("optimize/chat", payload);
+      display(result);
+      showReply(result.turns.at(-1));
+    }, () => {
+      const turn = state.turns.find((t) => t.request_revision === revision && t.message === message && t.provider === provider);
+      if (turn) showReply(turn);
+      return Boolean(turn);
+    });
+  }
+
+  async function decide(change, action) {
+    function showDecision() {
+      showSection(change.section, action === "approve" ? change.after : change.before);
+      notice(action === "approve" ? "已采用此项，下次解卦将使用新规则。" : "已放弃此项。");
+    }
+    await run(async () => {
+      display(await bridge.apiPost("optimize/decision", { id: change.id, action }));
+      showDecision();
+    }, () => {
+      const status = action === "approve" ? "approved" : "dismissed";
+      const saved = state.turns.some((t) => t.changes.some((c) => c.id === change.id && c.status === status));
+      if (saved) showDecision();
+      return saved;
+    });
+  }
+
+  root.querySelector(".mobile-link").addEventListener("click", (event) => {
+    event.preventDefault();
+    $("logic").scrollIntoView({ block: "start" });
+    $("rule-text").focus({ preventScroll: true });
+  });
+  $("chat-form").addEventListener("submit", send);
+  $("provider").addEventListener("change", controls);
+  $("message").addEventListener("input", controls);
+  $("message").addEventListener("keydown", (event) => {
+    if (!event.isComposing && (event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      if (!$("send").disabled) $("chat-form").requestSubmit();
+    }
+  });
+  $("use-cases").addEventListener("change", () => { $("case-options").hidden = !$("use-cases").checked; });
+  $("section").addEventListener("change", () => renderRule());
+  $("new-chat").addEventListener("click", () => { $("reset-panel").hidden = false; });
+  $("reset-cancel").addEventListener("click", () => { $("reset-panel").hidden = true; });
+  $("reset-confirm").addEventListener("click", () => run(async () => {
+    display(await bridge.apiPost("optimize/reset", { revision: state.revision }));
+    $("message").value = $("serials").value = "";
+    $("use-cases").checked = false;
+    $("case-options").hidden = $("reset-panel").hidden = true;
+    notice("已开始新对话。");
+  }));
+
+  async function connect() {
+    if (!bridge) throw new Error("请从 AstrBot 管理后台打开「解卦优化」。");
+    await bridge.ready();
+    await refresh();
+    notice("");
+  }
+  $("refresh").addEventListener("click", () => run(connect));
+  run(connect);
+}

@@ -1,5 +1,8 @@
+import { mountWorkshop } from "./workshop-tab.js";
+
 const $ = (id) => document.getElementById(id);
-const bridge = window.AstrBotPluginPage;
+const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+const modes = ["users", "cases", "usage", "optimize"];
 let mode = "users", page = 1, pages = 1, generation = 0, busy = false;
 let detailGeneration = 0;
 const number = (value) => new Intl.NumberFormat("zh-CN").format(value || 0);
@@ -142,6 +145,7 @@ function openModels() {
   });
 }
 async function load() {
+  if (mode === "optimize") return;
   const current = ++generation;
   $("refresh").disabled = true;
   $("count").textContent = "正在加载…";
@@ -216,9 +220,20 @@ function renderRows(items) {
 }
 async function switchMode(next) {
   mode = next; page = 1; $("search").value = "";
-  for (const tab of ["users", "cases", "usage"]) {
+  for (const tab of modes) {
     $(`tab-${tab}`).classList.toggle("active", tab === mode);
     $(`tab-${tab}`).setAttribute("aria-pressed", String(tab === mode));
+  }
+  const workshop = $("optimize-panel");
+  const optimizing = mode === "optimize";
+  $("management-list").hidden = $("records-footnote").hidden = $("refresh").hidden = optimizing;
+  workshop.hidden = !optimizing;
+  notice("");
+  if (optimizing) {
+    // Discard a late list response and keep the discussion mounted between tab switches.
+    generation++;
+    if (!workshop.shadowRoot) mountWorkshop(workshop, bridge);
+    return;
   }
   const options = mode === "users" ? [["all", "全部用户"], ["active", "正常使用"], ["banned", "已封禁"]]
     : [["all", "全部卦例"], ["pending", "待反馈"], ["feedback", "已反馈"], ["unavailable", "不可反馈"]];
@@ -233,7 +248,7 @@ async function switchMode(next) {
     usageSearchPlaceholder();
     $("table-hint").textContent = "北京时间，周一为一周起点。按模型调用开始日期统计；包含预审、解卦、复解、反馈审核和模型检测。缓存 Token 已包含在输入中。仅累计供应商已报告用量，未知不按 0 计算；旧卦仅记录升级后的调用。";
   }
-  notice(""); await load();
+  await load();
 }
 async function openDetail(kicker, title, fetcher, render) {
   if (busy) return;
@@ -515,9 +530,7 @@ function openUsage(id) {
 $("close-detail").addEventListener("click", () => { if (!busy) $("detail").close(); });
 $("detail").addEventListener("cancel", (event) => { if (busy) event.preventDefault(); });
 $("detail").addEventListener("close", () => { detailGeneration++; });
-$("tab-users").addEventListener("click", () => switchMode("users"));
-$("tab-cases").addEventListener("click", () => switchMode("cases"));
-$("tab-usage").addEventListener("click", () => switchMode("usage"));
+for (const tab of modes) $(`tab-${tab}`).addEventListener("click", () => switchMode(tab));
 $("models").addEventListener("click", openModels);
 $("export-cases").addEventListener("click", exportCases);
 $("usage-view").addEventListener("change", () => { page = 1; $("search").value = ""; usageSearchPlaceholder(); notice(""); load(); });

@@ -98,7 +98,7 @@ async function openPage(t, protocol = "http") {
         "<head>", `<head><script>(${installBridge.toString()})();</script>`,
       ),
     });
-    if (path === "/app.js" || path === "/style.css") return route.fulfill({
+    if (["/app.js", "/workshop-tab.js", "/style.css"].includes(path)) return route.fulfill({
       contentType: path.endsWith(".js") ? "text/javascript" : "text/css", headers,
       body: readFileSync(join(pageRoot, path.slice(1)), "utf8"),
     });
