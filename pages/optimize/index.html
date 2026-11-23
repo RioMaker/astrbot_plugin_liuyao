@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>六爻 · 解卦优化</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <header class="page-head">
+      <div><h1>解卦优化</h1><p>与模型复盘原断和反馈，再逐项决定如何调整规则。</p></div>
+      <div class="actions"><a class="mobile-link" href="#logic">查看当前逻辑</a><button id="refresh" type="button">刷新</button></div>
+    </header>
+    <p id="notice" role="status" aria-live="polite">正在连接 AstrBot…</p>
+    <div class="workspace">
+      <section class="panel chat" aria-labelledby="chat-title">
+        <div class="panel-head"><h2 id="chat-title">复盘对话</h2><button type="button" id="new-chat" class="quiet" disabled>新对话</button></div>
+        <div id="reset-panel" class="reset-panel" hidden>
+          <p>本账号保留最近八轮讨论。开始新对话或重载插件会清空讨论和待审建议。已采用的规则保存在插件配置中。</p>
+          <div class="actions"><button type="button" id="reset-confirm">开始新对话</button><button type="button" id="reset-cancel">取消</button></div>
+        </div>
+        <div id="conversation" aria-label="对话记录" tabindex="0">
+          <p class="empty">可以从一次判断失准的经历开始，或贴入一段想复盘的对话。</p>
+        </div>
+        <form id="chat-form">
+          <fieldset id="composer" disabled>
+            <div class="settings">
+              <label for="provider">讨论模型<select id="provider" required></select></label>
+              <label class="check"><input type="checkbox" id="use-cases"> 本轮引用卦例库</label>
+            </div>
+            <label id="case-options" for="serials" hidden>指定卦例编号（选填）
+              <input id="serials" type="text" maxlength="80" placeholder="例如 233，305" aria-describedby="case-hint">
+              <small id="case-hint">留空会检索最多 3 个有实际反馈的卦例。引用的排盘、原断与反馈会发送给所选模型。</small>
+            </label>
+            <label for="message">讨论内容
+              <textarea id="message" rows="3" maxlength="6000" required placeholder="例如：这次把口头承诺断成了签约，应该怎样修改判断依据？"></textarea>
+            </label>
+            <div class="send-row"><small>可粘贴对话，Ctrl / ⌘ + Enter 发送。</small><button class="primary" type="submit" id="send" disabled>发送</button></div>
+          </fieldset>
+        </form>
+      </section>
+      <section class="panel logic" id="logic" aria-labelledby="logic-title">
+        <div class="panel-head"><h2 id="logic-title">当前解卦逻辑</h2></div>
+        <div class="reader">
+          <label for="section">查看章节<select id="section" disabled></select></label>
+          <p id="section-scope" class="scope"></p>
+          <div id="rule-text" tabindex="0" aria-label="生效原文"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

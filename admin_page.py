@@ -56,7 +56,7 @@ class AdminPageMixin:
             logger.warning("liuyao：管理页需要支持 astrbot.api.web 的 AstrBot 版本")
             return
 
-        def handler_for(callback, *, post=False, raw_response=False):
+        def handler_for(callback, *, post=False, raw_response=False, identified=False):
             async def handler(**params):
                 if not self._admin_page_active:
                     return error_response("六爻插件已卸载，请重载插件后刷新页面", status_code=503)
@@ -69,6 +69,10 @@ class AdminPageMixin:
                         if not isinstance(body, dict):
                             raise ManagementError("请求体必须为 JSON 对象")
                         result = await callback(**params, payload=body, actor=request.username)
+                    elif identified:
+                        result = await callback(
+                            **params, query=request.query, actor=request.username
+                        )
                     else:
                         result = await callback(**params, query=request.query)
                     return result if raw_response else json_response(result)
@@ -109,6 +113,19 @@ class AdminPageMixin:
             ["GET"],
             "导出全部六爻卦例及存储说明",
         )
+
+        for path, callback, post in (
+            ("optimize/state", self._page_workshop, False),
+            ("optimize/chat", self._admin_workshop_chat, True),
+            ("optimize/decision", self._admin_workshop_decide, True),
+            ("optimize/reset", self._admin_workshop_reset, True),
+        ):
+            register(
+                f"/astrbot_plugin_liuyao/{path}",
+                handler_for(callback, post=post, identified=True),
+                ["POST" if post else "GET"],
+                "六爻解卦优化",
+            )
 
     async def _page_export_cases(self, *, query):
         from astrbot.api.web import stream_response

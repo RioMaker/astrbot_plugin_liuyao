@@ -133,7 +133,7 @@ def summarize(runs) -> dict:
     result["casts"] = len({run["cast_key"] for run in runs if run.get("cast_key")})
     result["tracked"] = bool(runs)
     result["historical"] = bool(runs) and not any(
-        run.get("kind") in {"cast", "debug"} for run in runs
+        run.get("kind") in {"cast", "debug", "workshop"} for run in runs
     )
     return result
 
@@ -176,6 +176,8 @@ def overview(runs, now):
 def usage_rows(runs, view):
     groups = {}
     for run in runs:
+        if run["kind"] == "workshop" and view in {"groups", "users"}:
+            continue  # Dashboard calls have no QQ user or group.
         if view in {"daily", "weekly", "monthly"}:
             for call in run["calls"]:
                 key = period_start(date.fromisoformat(call["at"][:10]), view).isoformat()
@@ -244,14 +246,14 @@ class TokenUsageMixin:
             raise asyncio.CancelledError
 
     def _new_token_run(self, event, *, kind, question="", cast=None, case=None):
-        name, sender = self._caster_identity(event)
+        name, sender = self._caster_identity(event) if event is not None else ("", "")
         run = {
             "id": "run-" + uuid4().hex,
             "kind": kind,
             "created_at": self._ai_daily_now().astimezone(BEIJING).isoformat(),
             "caster_id": str(sender),
             "caster_name": name[:100],
-            "group_id": str(event.get_group_id() or ""),
+            "group_id": str(event.get_group_id() or "") if event is not None else "",
             "question": question[:200],
             "cast_key": "",
             "cast_at": "",

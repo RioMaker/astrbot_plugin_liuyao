@@ -237,7 +237,26 @@
     "type": "text",
     "description": "默认起卦 AI 解卦提示词",
     "default": "",
-    "hint": "留空时插件会自动填入内置提示词，清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件仍会追加纯文本输出、专业边界和断语要求。"
+    "hint": "打开本插件的「解卦优化」页面，可与模型复盘卦例并逐项确认修改。清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件会追加纯文本输出、专业边界和断语要求。",
+    "obvious_hint": true
+  },
+  "interpretation_general_rules": {
+    "type": "text",
+    "description": "通用研判规则",
+    "default": "",
+    "hint": "用于天气、射覆以外的解读。{intent_label} 会替换为实际方向。清空保存即恢复内置默认。"
+  },
+  "interpretation_weather_rules": {
+    "type": "text",
+    "description": "天气研判规则",
+    "default": "",
+    "hint": "用于天气类排盘的 AI 解读。清空保存即恢复内置默认。"
+  },
+  "interpretation_shefu_rules": {
+    "type": "text",
+    "description": "射覆研判规则",
+    "default": "",
+    "hint": "用于射覆类排盘的 AI 解读。清空保存即恢复内置默认。"
   },
   "feedback_review_prompt": {
     "type": "text",

@@ -3,7 +3,7 @@ const bridge = window.AstrBotPluginPage;
 let mode = "users", page = 1, pages = 1, generation = 0, busy = false;
 let detailGeneration = 0;
 const number = (value) => new Intl.NumberFormat("zh-CN").format(value || 0);
-const stageNames = { pre_review: "内容预审", interpretation: "解卦", reuse_review: "复解预审", reuse_interpretation: "复解", feedback: "反馈审核", ping: "模型检测", chart_comment: "旧版图卡短评", shefu: "射覆解读" };
+const stageNames = { pre_review: "内容预审", interpretation: "解卦", reuse_review: "复解预审", reuse_interpretation: "复解", feedback: "反馈审核", ping: "模型检测", chart_comment: "旧版图卡短评", shefu: "射覆解读", workshop: "解卦优化对话" };
 function tokenText(usage, historical = false) {
   if (!usage?.tracked && usage?.calls === undefined) return "未记录";
   if (historical && !usage?.tracked) return "历史未记录";
@@ -456,9 +456,11 @@ function renderUsageRows(items) {
   for (const item of items) {
     const row = node("tr"), cells = Array.from({ length: 7 }, () => node("td")), usage = item.usage;
     if (view === "cases") {
-      const title = item.serial ? `卦例 #${item.serial}` : item.kind === "debug" ? "管理员调试" : item.kind === "ping" ? "模型检测" : "未留存卦例";
+      const title = item.serial ? `卦例 #${item.serial}` : ({ debug: "管理员调试", ping: "模型检测", workshop: "解卦优化对话" }[item.kind] || "未留存卦例");
       const question = node("div", item.question || title, "question"); question.title = item.question;
-      cells[0].append(node("div", title, "primary"), question, node("small", `${time(item.created_at)} · QQ ${item.caster_id} · 群 ${item.group_id || "无"}`));
+      cells[0].append(node("div", title, "primary"));
+      if (item.kind === "workshop") cells[0].append(node("small", `${time(item.created_at)} · 插件后台`));
+      else cells[0].append(question, node("small", `${time(item.created_at)} · QQ ${item.caster_id} · 群 ${item.group_id || "无"}`));
       cells[6].append(button("调用明细", () => openUsage(item.id), "link-button"));
     } else if (view === "groups" || view === "users") {
       cells[0].append(node("div", view === "users" ? item.caster_name || `QQ ${item.id}` : `群 ${item.id || "无群号"}`, "primary"));
@@ -490,7 +492,7 @@ function openUsage(id) {
     $("detail-title").textContent = record.serial ? `卦例 #${record.serial} · Token 消耗` : "Token 调用明细";
     const facts = node("div", "", "facts");
     facts.append(fact("累计 Token", tokenText(usage)), fact("模型调用", `${usage.calls} 次`), fact("用量未知", `${usage.unknown_calls} 次`));
-    body.append(facts, node("p", `${record.question} · QQ ${record.caster_id} · 群 ${record.group_id || "无"}`, "help"));
+    body.append(facts, node("p", record.kind === "workshop" ? "插件后台 · 解卦优化对话" : `${record.question} · QQ ${record.caster_id} · 群 ${record.group_id || "无"}`, "help"));
     if (usage.historical && record.kind !== "ping") body.append(node("p", "仅包含启用记录后的调用，原卦的历史消耗未补记。", "help"));
     body.append(node("p", "预审、解卦、复解和反馈审核均累计到原卦。缓存输入已包含在输入和总量中。用量未知可能来自超时、取消、处理中或供应商未返回用量数据，不代表免费。", "help"));
     const stagesSection = section("按调用阶段汇总");

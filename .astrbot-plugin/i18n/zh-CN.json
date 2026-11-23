@@ -3,6 +3,20 @@
     "manage": {
       "title": "用户与卦例管理",
       "description": "管理起卦用户、赠送额度、封禁与卦例记录。"
+    },
+    "optimize": {
+      "title": "解卦优化",
+      "description": "结合对话与卦例复盘，查看解卦规则并逐项确认修改。"
+    }
+  },
+  "views": {
+    "manage": {
+      "title": "用户与卦例管理",
+      "description": "管理起卦用户、赠送额度、封禁与卦例记录。"
+    },
+    "optimize": {
+      "title": "解卦优化",
+      "description": "结合对话与卦例复盘，查看解卦规则并逐项确认修改。"
     }
   }
 }
