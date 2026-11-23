@@ -259,6 +259,8 @@ class TokenUsageMixin:
             "cast_at": "",
             "calls": [],
         }
+        if kind == "cast":
+            run["chart_sent"] = False
         if cast is not None and cast.cast_at is not None:
             self._set_token_cast(run, cast)
         if case is not None:
@@ -269,6 +271,16 @@ class TokenUsageMixin:
                 cast_at=case["created_at"],
             )
         return run
+
+    async def _mark_cast_chart_sent(self, run):
+        # The run ID identifies the new cast even when two manual casts have
+        # identical lines and an identical, user-supplied casting time.
+        def change(runs):
+            if run["id"] not in runs:
+                runs[run["id"]] = copy.deepcopy(run)
+            runs[run["id"]]["chart_sent"] = True
+
+        await self._try_token_write(change)
 
     @staticmethod
     def _set_token_cast(run, cast):

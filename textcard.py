@@ -112,7 +112,8 @@ class LiuyaoTextCardRenderer:
         paging = next(row for row in entries if row[0].startswith("/六爻反馈 列表"))
         admin = next(row for row in entries if row[0].startswith("/六爻 开"))
         help_row = next(row for row in entries if row[0] == "/六爻")
-        utilities = [row for row in entries if row[0] in {"/额度", "/ping"}]
+        utility_labels = {"/六爻排行": "看群榜", "/额度": "查额度", "/ping": "测模型"}
+        utilities = [row for row in entries if row[0] in utility_labels]
         manual = [row for row in entries if row[0].startswith(("/六爻排盘", "/六爻解卦", "时间="))]
         measure = ImageDraw.Draw(Image.new("RGB", (CARD_WIDTH, 1), PAPER))
 
@@ -145,7 +146,7 @@ class LiuyaoTextCardRenderer:
         paging_lines = wrap(f"翻页  {paging[0]} · {paging[1]}", 22, CONTENT_WIDTH - 56)
         feedback_height = sum(row[3] for row in feedback_rows) + 128 + len(paging_lines) * 34
         utilities_y = feedback_y + 62 + feedback_height + 46
-        utility_width = (CONTENT_WIDTH - 20) // 2
+        utility_width = (CONTENT_WIDTH - 20 * (len(utilities) - 1)) // len(utilities)
         utility_rows = [
             (command, wrap(description, 24, utility_width - 48))
             for command, description in utilities
@@ -230,7 +231,7 @@ class LiuyaoTextCardRenderer:
                 fill=PAPER_DEEP,
             )
             write(left + 24, top + 22, command, 32, JADE)
-            label = "查额度" if command == "/额度" else "测模型"
+            label = utility_labels[command]
             _text_right(draw, left + utility_width - 24, top + 30, label, self._font(22), MUTED)
             write_lines(left + 24, top + 73, descriptions, 24, 35)
         top = utilities_y + 62 + utility_height + 18
@@ -250,6 +251,89 @@ class LiuyaoTextCardRenderer:
         except Exception as exc:
             path.unlink(missing_ok=True)
             raise ChartRenderError(f"保存六爻帮助图失败：{exc}") from exc
+        return path
+
+    def render_leaderboard(self, board, *, output_path: str | Path | None = None) -> Path:
+        """A phone-sized group report. Each list is independently ranked and paged."""
+        width, margin, row_height = 900, 50, 57
+        right = width - margin
+        top = 195
+        heights = [95 + max(1, len(section.entries)) * row_height for section in board.sections]
+        height = top + sum(heights) + 88
+        canvas = Image.new("RGB", (width, height), PAPER)
+        draw_bamboo_background(canvas, width)
+        draw = ImageDraw.Draw(canvas)
+
+        def write(x, y, value, size, color=INK, *, anchor="lm", serif=False):
+            draw.text(
+                (x, y), value, font=self._font(size, heading=serif), fill=color, anchor=anchor
+            )
+
+        def fit(value, size, pixels):
+            font = self._font(size)
+            if draw.textlength(value, font=font) <= pixels:
+                return value
+            while value and draw.textlength(value + "…", font=font) > pixels:
+                value = value[:-1]
+            return value + "…"
+
+        # The bundled serif contains the two-character masthead and numerals.
+        write(margin, 80, "六爻", 66, JADE, serif=True)
+        title_x = margin + draw.textlength("六爻", font=self._font(66, heading=True)) + 13
+        write(title_x, 85, "排行榜", 53, JADE)
+        draw_taiji_logo(canvas, right - 100, 46, width=100, height=100)
+        meta = f"群 {board.group}   ·   {board.participants} 位群友   ·   累计"
+        write(margin + 2, 143, fit(meta, 25, right - margin - 114), 25, MUTED)
+        draw.line((margin, 177, right, 177), fill=RULE, width=2)
+
+        palettes = (
+            (JADE, "#E3EBDD", "#CBD9C7"),
+            ("#354F68", "#E3E9EC", "#CED9DE"),
+            ("#885637", "#F0E5D5", "#E1D2BB"),
+        )
+        for section, block_height, (accent, tint, track) in zip(
+            board.sections, heights, palettes, strict=True
+        ):
+            draw.rounded_rectangle((margin, top + 13, margin + 6, top + 43), radius=3, fill=accent)
+            write(margin + 19, top + 26, section.title, 33, accent)
+            write(right, top + 28, f"合计 {section.total:,} 次", 24, accent, anchor="rm")
+            write(margin + 20, top + 62, section.scope, 23, MUTED)
+            row_top = top + 86
+            if not section.entries:
+                message = "本页没有更多记录" if section.total else "暂无记录"
+                write(margin + 22, row_top + row_height // 2, message, 26, MUTED)
+            for index, entry in enumerate(section.entries):
+                y = row_top + index * row_height
+                mid = y + row_height // 2
+                if entry.rank == 1:
+                    draw.rounded_rectangle((margin, y, right, y + row_height - 2), 9, fill=tint)
+                elif index:
+                    draw.line((margin + 14, y - 1, right - 14, y - 1), fill=RULE)
+                write(margin + 39, mid, str(entry.rank), 31, accent, anchor="mm", serif=True)
+                value = f"{entry.count:,}"
+                value_end = right - 52
+                value_width = draw.textlength(value, font=self._font(31, heading=True))
+                bar_end = min(right - 180, value_end - value_width - 22)
+                bar_start = bar_end - 140
+                name_x = margin + 85
+                write(name_x, mid, fit(entry.name, 30, bar_start - name_x - 22), 30)
+                draw.rounded_rectangle((bar_start, mid - 3, bar_end, mid + 3), radius=3, fill=track)
+                bar = max(5, round(140 * entry.count / section.peak))
+                draw.rounded_rectangle((bar_start, mid - 3, bar_start + bar, mid + 3), 3, accent)
+                write(value_end, mid, value, 31, accent, anchor="rm", serif=True)
+                write(right - 17, mid, "次", 22, MUTED, anchor="rm")
+            top += block_height
+
+        draw.line((margin, top + 15, right, top + 15), fill=RULE, width=2)
+        write(margin, top + 48, f"第 {board.page} / {board.pages} 页", 23, MUTED)
+        if board.page < board.pages:
+            write(right, top + 48, f"下一页  /六爻排行 {board.page + 1}", 24, JADE, anchor="rm")
+        path = temp_output_path(output_path)
+        try:
+            canvas.save(path, "PNG", optimize=True)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
         return path
 
     def render(

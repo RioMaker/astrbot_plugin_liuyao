@@ -30,6 +30,7 @@ if __package__:
     )
     from .feedback_review import FeedbackReviewMixin
     from .interpretation import InterpretationMixin
+    from .leaderboard import LeaderboardMixin
     from .manual_commands import ManualCommandsMixin
     from .model_settings import ModelSettingsMixin
     from .reading import ReadingService
@@ -63,6 +64,7 @@ else:  # pragma: no cover - direct local execution
     )
     from feedback_review import FeedbackReviewMixin
     from interpretation import InterpretationMixin
+    from leaderboard import LeaderboardMixin
     from manual_commands import ManualCommandsMixin
     from model_settings import ModelSettingsMixin
     from reading import ReadingService
@@ -86,7 +88,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.42.0"
+PLUGIN_VERSION = "0.43.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -123,6 +125,7 @@ HELP_TEXT = """六爻使用指南
 /六爻反馈 <编号>：回看原卦图与历次解读结论；加“结论 2”查看更早记录。
 /六爻反馈 <编号> <实际结果>：填写真实进展或结果；未通过可按原编号补充。
 /六爻反馈 列表 2：查看第 2 页，数字可替换。
+/六爻排行：查看本群起卦、AI 解卦与反馈排名，也可用 /六爻排行榜。
 /额度：今日余量、反馈积分与恢复时间。
 /ping：检测当前会话的六爻模型。
 /六爻：查看指令帮助图。"""
@@ -144,6 +147,7 @@ def _reply_card_chain(sender_id: str, image_path: str) -> list[Any]:
 )
 class LiuyaoPlugin(
     AdminPageMixin,
+    LeaderboardMixin,
     ReadingTestMixin,
     InterpretationWorkshopMixin,
     InterpretationMixin,
@@ -201,6 +205,10 @@ class LiuyaoPlugin(
     async def initialize(self):
         await self._load_custom_directions()
         await self._ensure_user_registry()
+        try:
+            await self._leaderboard_history()
+        except Exception as exc:
+            logger.warning("liuyao：导入历史排行失败，查询排行榜时将重试：%r", exc)
         try:
             self._workshop_versions()
         except Exception as exc:
@@ -980,6 +988,9 @@ class LiuyaoPlugin(
         if error := await self._user_access_error(event):
             return error
         text = self._help_text()
+        return "" if await self._send_text_card_image(event, "render_help", text) else text
+
+    async def _send_text_card_image(self, event, method: str, content) -> bool:
         image_path: Path | None = None
         try:
             renderer = getattr(self, "text_card", None)
@@ -988,20 +999,20 @@ class LiuyaoPlugin(
                     font_path=str(self._config_get("chart_font_path", "") or "")
                 )
                 self.text_card = renderer
-            image_path = Path(await asyncio.to_thread(renderer.render_help, text))
+            image_path = Path(await asyncio.to_thread(getattr(renderer, method), content))
             if not image_path.is_file() or image_path.stat().st_size <= 0:
-                raise ChartRenderError("未生成有效六爻帮助图片")
+                raise ChartRenderError("未生成有效六爻图卡")
             await event.send(event.image_result(str(image_path.absolute())))
-            return ""
+            return True
         except Exception as exc:
-            logger.warning("liuyao：帮助图片生成或发送失败：%r", exc)
-            return text
+            logger.warning("liuyao：%s 图片生成或发送失败：%r", method, exc)
+            return False
         finally:
             if image_path is not None:
                 try:
                     image_path.unlink(missing_ok=True)
                 except OSError as exc:
-                    logger.warning("liuyao：清理帮助图片失败：%r", exc)
+                    logger.warning("liuyao：清理 %s 临时图片失败：%r", method, exc)
 
     async def _dispatch_liuyao(
         self,
@@ -1022,6 +1033,8 @@ class LiuyaoPlugin(
 
         action, _, payload = re.match(r"^(\S+)(\s*)([\s\S]*)\Z", text).groups()
         payload = payload.strip()
+        if action in {"排行", "排行榜"}:
+            return await self._leaderboard_reply(event, payload)
         if action in {"排盘", "解卦"}:
             return await self._manual_command_reply(event, payload, analyze=action == "解卦")
         if action == "反馈":
@@ -1333,6 +1346,8 @@ class LiuyaoPlugin(
                 source="指令",
                 **({"trace": trace} if trace is not None else {}),
             )
+            if token_run["kind"] == "cast" and chart_status.startswith("已发送"):
+                await self._mark_cast_chart_sent(token_run)
             text = refusal or analysis
             if not chart_status.startswith(("已发送", "已加入调试报告")):
                 text = f"排盘图未能发送（{chart_status}）。\n" + text
