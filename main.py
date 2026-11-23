@@ -88,7 +88,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.39.1"
+PLUGIN_VERSION = "0.40.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -192,12 +192,17 @@ class LiuyaoPlugin(
         self._case_lock = asyncio.Lock()
         self._cast_lock = asyncio.Lock()
         self._pending_agent_cases: dict[str, list[str]] = {}
-        self._workshop_sessions = {}
+        self._workshop_busy: set[str] = set()
+        self._workshop_history = None
         self._register_admin_page()
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
 
     async def initialize(self):
         await self._ensure_user_registry()
+        try:
+            self._workshop_versions()
+        except Exception as exc:
+            logger.warning("liuyao：加载提示词版本历史失败，打开解卦优化时将重试：%r", exc)
 
     # ------------------------------------------------------------------
     # 两条等价根指令：自由文本与保留子命令都由插件统一分派。

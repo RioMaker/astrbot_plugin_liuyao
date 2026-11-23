@@ -9,6 +9,19 @@ from typing import Any
 CASE_SCHEMA_VERSION = 2
 
 
+def feedback_with_text(case: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = case.get("feedback")
+    if not isinstance(rows, list):
+        return []
+    return [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and row.get("valid") is not False
+        and str(row.get("text") or "").strip()
+    ]
+
+
 def feedback_closed(case: dict[str, Any]) -> bool:
     return any(
         isinstance(row, dict) and row.get("valid") is not False for row in case.get("feedback", [])
@@ -116,13 +129,7 @@ def search_cases(
     ranked: list[tuple[float, str, dict[str, Any]]] = []
     for case in cases:
         # 未收到任何实际反馈的卦例不作为解卦参考，避免未经验证的旧断影响新判断。
-        feedback = case.get("feedback")
-        if not isinstance(feedback, list) or not any(
-            isinstance(item, dict)
-            and item.get("valid") is not False
-            and str(item.get("text") or "").strip()
-            for item in feedback
-        ):
+        if not feedback_with_text(case):
             continue
         if not cross_group and str(case.get("group_id") or "") != str(group_id):
             continue

@@ -116,6 +116,9 @@ class AdminPageMixin:
 
         for path, callback, post in (
             ("optimize/state", self._page_workshop, False),
+            ("optimize/cases", self._page_workshop_cases, False),
+            ("optimize/history", self._page_workshop_history, False),
+            ("optimize/versions", self._page_workshop_versions, False),
             ("optimize/chat", self._admin_workshop_chat, True),
             ("optimize/decision", self._admin_workshop_decide, True),
             ("optimize/reset", self._admin_workshop_reset, True),

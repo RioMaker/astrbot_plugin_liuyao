@@ -237,7 +237,7 @@
     "type": "text",
     "description": "默认起卦 AI 解卦提示词",
     "default": "",
-    "hint": "在「用户与卦例管理」中点击「Token 统计」右侧的「解卦优化」，可与模型复盘卦例并逐项确认修改。清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件会追加纯文本输出、专业边界和断语要求。",
+    "hint": "在「用户与卦例管理」的「解卦优化」中可筛选卦例、逐项确认建议，查看优化记录和历版提示词全文。清空保存即恢复内置默认。可用变量 {question}、{chart}、{max_chars}。插件会追加纯文本输出、专业边界和断语要求。",
     "obvious_hint": true
   },
   "interpretation_general_rules": {
@@ -302,8 +302,8 @@
   },
   "case_reference_limit": {
     "type": "int",
-    "description": "每次起卦参考的历史卦例数",
-    "hint": "允许范围 1-5，优先选择同方向、同卦象、问题相近且已有反馈的卦例。",
+    "description": "新卦建档时检索的历史卦例数",
+    "hint": "范围 1–5，按卦象、方向和用词匹配有实际反馈的卦例。当前常规解卦提示词尚未接入这批结果。",
     "default": 3
   },
   "case_library_cross_group": {

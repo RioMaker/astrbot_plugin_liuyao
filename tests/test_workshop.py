@@ -41,9 +41,10 @@ def edit(section=GENERAL, before=ORIGINAL, after=BETTER):
 
 
 @pytest.fixture
-def setup_workshop():
+def setup_workshop(tmp_path, monkeypatch):
     # Construct the actual Star to exercise config defaults and ReadingService wiring.
     base, event = prepare()
+    monkeypatch.setattr("workshop.history_path", lambda: tmp_path / "workshop.db")
     cfg = Config({**base.config, GENERAL: "观察{intent_label}。\n" + ORIGINAL})
     ctx = base.context
     ctx.get_all_providers = lambda: [
@@ -141,7 +142,7 @@ def test_review_only_selected_change_reaches_next_command_and_survives_reload(se
         reloaded = LiuyaoPlugin(plugin.context, Config(plugin.config.saved))
         again = await state(reloaded)
         assert again["sections"][GENERAL]["text"] == applied["sections"][GENERAL]["text"]
-        assert again["turns"] == []
+        assert again["turns"] == applied["turns"]
         assert reloaded.readings.render(
             CastResult((7, 8, 7, 8, 7, 8)),
             intent="weather",
@@ -372,3 +373,218 @@ def test_workshop_discovery_and_config():
 
 def test_management_tab_ships_the_current_workshop():
     assert TARGET.read_text(encoding="utf-8") == render_bundle()
+
+
+def test_picker_filters_verified_text_outcome_direction_and_keyword_before_paging(setup_workshop):
+    plugin, _ = setup_workshop
+    cases = [
+        {
+            "id": str(n),
+            "serial": n,
+            "intent": "career",
+            "question": "合同会签吗",
+            "cast": {"primary_name": "乾", "changed_name": "泰"},
+            "verdict": "月末有结果",
+            "feedback": [{"outcome": "未应验", "text": "实际延期"}],
+        }
+        for n in range(1, 24)
+    ]
+    cases.extend(
+        [
+            {"id": "legacy", "intent": "weather", "feedback": [{"text": "晴天"}]},
+            {"id": "invalid", "feedback": [{"text": "延期", "outcome": "未应验", "valid": False}]},
+            {"id": "blank", "feedback": [{"text": " "}]},
+        ]
+    )
+    plugin._test_store[CASES_KEY] = cases
+
+    async def listing(**query):
+        return await plugin._page_workshop_cases(actor="alice", query=query)
+
+    async def run():
+        default = await listing()
+        assert default["total"] == 24 and default["items"][0]["serial"] == 24
+        assert (await listing(feedback="unverified"))["total"] == 2
+        assert (await listing(feedback="未分类", intent="weather", search="晴天"))["total"] == 1
+        for word in ("合同", "乾", "泰", "月末", "延期"):
+            matches = await listing(feedback="未应验", intent="career", search=word, page="2")
+            assert matches["total"] == 23 and matches["pages"] == 2
+            assert [row["serial"] for row in matches["items"]] == [3, 2, 1]
+        assert (await listing(feedback="应验", search="合同"))["items"] == []
+        assert (await listing(search="#21"))["items"][0]["direction"] == "事业"
+        assert [row["serial"] for row in (await listing(search="＃003"))["items"]] == [3]
+        for bad in ({"page": "0"}, {"feedback": "错"}, {"intent": "错"}):
+            with pytest.raises(ManagementError):
+                await listing(**bad)
+        selected = await chat(plugin, response(), use_cases=True, serials=[23, 3, 25])
+        material = selected["turns"][0]["cases"]
+        assert [item["serial"] for item in material] == [23, 3, 25]
+        assert material[0]["feedback"] == ["未应验 · 实际延期"] and material[2]["feedback"] == []
+
+    asyncio.run(run())
+
+
+def test_archive_preserves_all_rounds_failures_and_decisions_beyond_reset(setup_workshop):
+    plugin, _ = setup_workshop
+
+    async def history(actor="alice", **query):
+        return await plugin._page_workshop_history(actor=actor, query=query)
+
+    async def run():
+        first = (await chat(plugin, response(changes=[edit()])))["turns"][0]
+        for n in range(9):
+            await chat(plugin, response("普通讨论"), message=f"讨论 {n}")
+        assert len((await state(plugin))["turns"]) == 8
+        with pytest.raises(ManagementError):
+            await chat(plugin, response(changes=[edit(before="无此原文")]))
+        plugin.context.llm_generate = AsyncMock(side_effect=asyncio.TimeoutError)
+        with pytest.raises(ManagementError):
+            await plugin._admin_workshop_chat(
+                actor="alice", payload=chat_payload(await state(plugin))
+            )
+        await chat(plugin, response(), "bob")
+        await plugin._admin_workshop_reset(
+            actor="alice", payload={"revision": (await state(plugin))["revision"]}
+        )
+        latest, old = await history(), await history(page="2")
+        assert latest["total"] == 12 and len(old["items"]) == 2 and latest["pages"] == 2
+        assert latest["items"][0]["status"] == latest["items"][1]["status"] == "failed"
+        assert "超时" in (await history(id=latest["items"][0]["id"]))["reply"]
+        archived = await history(id=first["id"])
+        assert archived["reply"] == first["reply"]
+        assert (
+            archived["changes"][0]["status"] == "archived" and archived["changes"][0]["decided_at"]
+        )
+        assert archived["versions"][GENERAL] == 1 and archived["actor"] == "alice"
+        assert (await state(plugin))["turns"] == []
+        assert (await history("bob"))["total"] == 1
+        with pytest.raises(ManagementError) as denied:
+            await history("bob", id=first["id"])
+        assert denied.value.status == 404
+        with pytest.raises(ManagementError):
+            await decide(plugin, first["changes"][0], "approve")
+        assert (await plugin._page_workshop_versions(query={"section": GENERAL}, actor="alice"))[
+            "total"
+        ] == 1
+
+    asyncio.run(run())
+
+
+def test_version_snapshots_match_live_config_and_link_to_original_evidence(setup_workshop):
+    plugin, _ = setup_workshop
+    plugin._test_store[CASES_KEY] = [
+        {"id": "ref", "serial": 9, "question": "能签约吗", "feedback": [{"text": "只口头答应"}]}
+    ]
+
+    async def versions(**query):
+        return await plugin._page_workshop_versions(
+            actor="alice", query={"section": GENERAL} | query
+        )
+
+    async def run():
+        original = plugin.config[GENERAL]
+        turn = (await chat(plugin, response(changes=[edit()]), use_cases=True, serials=[9]))[
+            "turns"
+        ][0]
+        plugin._test_store[CASES_KEY].clear()
+        await decide(plugin, turn["changes"][0], "approve")
+        await decide(plugin, turn["changes"][0], "approve")
+        v1 = await versions(number="1")
+        v2 = await versions(number="2")
+        assert v1["source"] == "initial" and v1["text"] == v2["previous"] == original
+        assert v2["number"] == 2 and v2["source"] == "workshop" and v2["actor"] == "alice"
+        assert v2["turn_id"] == turn["id"] and v2["reason"] == edit()["reason"]
+        assert v2["before"] == ORIGINAL and v2["after"] == BETTER
+        assert v2["can_view_turn"] is True
+        shared = await plugin._page_workshop_versions(
+            actor="bob", query={"section": GENERAL, "number": 2}
+        )
+        assert shared["text"] == v2["text"] and shared["can_view_turn"] is False
+        assert v2["text"] == plugin.config[GENERAL] == original.replace(ORIGINAL, BETTER)
+        plugin.config[GENERAL] = "管理员手动更新后的整节原文。"
+        external = await versions(number="3")
+        assert external["source"] == "config" and external["actor"] is None
+        assert external["previous"] == v2["text"] and external["text"] == plugin.config[GENERAL]
+        assert "+管理员手动更新后的整节原文。" in external["diff"]
+        assert [v["number"] for v in (await versions())["items"]] == [3, 2, 1]
+        assert (await versions(number="1")) == v1 and (await versions(number="2")) == v2
+        detail = await plugin._page_workshop_history(actor="alice", query={"id": turn["id"]})
+        assert detail["changes"][0]["version"] == 2 and detail["cases"][0]["feedback"] == [
+            "只口头答应"
+        ]
+        with pytest.raises(ManagementError):
+            await versions(number="99")
+        with pytest.raises(ManagementError):
+            await versions(section="guardrail")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("saved", [True, False])
+def test_restart_recovers_approval_intent_without_extra_version_or_save(setup_workshop, saved):
+    plugin, _ = setup_workshop
+
+    async def run():
+        turn = (await chat(plugin, response(changes=[edit()])))["turns"][0]
+        draft = turn["changes"][0]
+        plugin._journal().decide(draft["id"], "alice", "applying")
+        if saved:
+            plugin.config[GENERAL] = plugin.config[GENERAL].replace(ORIGINAL, BETTER)
+        reloaded = LiuyaoPlugin(plugin.context, Config(plugin.config))
+        after = await state(reloaded)
+        current = after["turns"][0]["changes"][0]
+        assert current["status"] == ("approved" if saved else "pending")
+        assert after["versions"][GENERAL] == (2 if saved else 1)
+        saves = reloaded.config.saves
+        applied = await decide(reloaded, draft, "approve")
+        assert applied["versions"][GENERAL] == 2 and BETTER in reloaded.config[GENERAL]
+        assert reloaded.config.saves - saves == (0 if saved else 1)
+
+    asyncio.run(run())
+
+
+def test_interrupted_model_call_survives_reload_as_a_readable_round(setup_workshop):
+    plugin, _ = setup_workshop
+
+    async def run():
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def generate(**kwargs):
+            started.set()
+            await finish.wait()
+            return response(changes=[edit()])
+
+        plugin.context.llm_generate = generate
+        body = chat_payload(await state(plugin))
+        pending = asyncio.create_task(plugin._admin_workshop_chat(actor="alice", payload=body))
+        await started.wait()
+        reloaded = LiuyaoPlugin(plugin.context, Config(plugin.config))
+        assert not (await state(reloaded))["processing"]
+        rows = await reloaded._page_workshop_history(actor="alice", query={})
+        assert rows["total"] == 1 and rows["items"][0]["status"] == "interrupted"
+        finish.set()
+        with pytest.raises(ManagementError, match="已中断"):
+            await pending
+        assert not (await state(reloaded))["turns"]
+        assert (await state(reloaded))["versions"][GENERAL] == 1
+
+    asyncio.run(run())
+
+
+def test_plugin_load_captures_config_changes_before_any_workshop_visits(setup_workshop):
+    plugin, _ = setup_workshop
+
+    async def run():
+        await plugin.initialize()
+        first = plugin.config[GENERAL]
+        for text in ("第一次在配置页修改。", "第二次在配置页修改。"):
+            reloaded = LiuyaoPlugin(plugin.context, Config(plugin.config | {GENERAL: text}))
+            reloaded._ensure_user_registry = AsyncMock()
+            await reloaded.initialize()
+        versions = await reloaded._page_workshop_versions(actor="alice", query={"section": GENERAL})
+        assert [row["source"] for row in versions["items"]] == ["config", "config", "initial"]
+        assert reloaded._journal().version_detail(GENERAL, 1)["text"] == first
+        assert reloaded._journal().history("alice", 1)["total"] == 0
+
+    asyncio.run(run())

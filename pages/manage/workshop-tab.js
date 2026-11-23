@@ -95,6 +95,25 @@ fieldset { border: 0; margin: 0; padding: 15px 22px 20px; min-inline-size: 0; di
 .scope { font-size: 12px; margin: 10px 0; }
 #rule-text { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; max-height: 64vh; line-height: 1.85; border-top: 1px solid var(--line); padding: 13px 0 0; }
 mark { color: var(--amber); background: var(--cream); }
+.collection > summary { font-size: 15px; font-weight: 650; }
+.archive { padding: 15px 22px; margin: 0; border-top: 1px solid var(--line); }
+.filters, .paging { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-top: 10px; }
+.filters label:first-child { flex: 1 1 100%; }
+.filters label:not(:first-child) { flex: 1 1 100px; }
+.filters input, .filters select { width: 100%; }
+.collection .items { margin-top: 8px; }
+#case-picker .items { max-height: 270px; overflow-y: auto; }
+.case-choice { display: flex; gap: 9px; padding: 8px 2px; align-items: start; cursor: pointer; }
+.case-choice + .case-choice, .record + .record { border-top: 1px solid var(--line); }
+.case-choice input { flex: none; margin: 4px 0 0; accent-color: var(--accent); }
+.case-choice span { min-width: 0; overflow-wrap: anywhere; }
+.case-choice small { display: block; }
+.paging { align-items: center; color: var(--muted); }
+.paging button { font-size: 12px; }
+.record { padding: 8px 0; margin: 0; }
+.record-body { margin: 8px 0 2px; }
+.record-body .ask, .record-body .comparison { margin-bottom: 9px; }
+.rule-copy { max-height: 340px; overflow-y: auto; padding: 10px; background: var(--bg); border-radius: 6px; }
 .mobile-link { display: none; }
 @media (max-width: 780px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
@@ -118,7 +137,7 @@ mark { color: var(--amber); background: var(--cream); }
       <section class="panel chat" aria-labelledby="chat-title">
         <div class="panel-head"><h2 id="chat-title">复盘对话</h2><button type="button" id="new-chat" class="quiet" disabled>新对话</button></div>
         <div id="reset-panel" class="reset-panel" hidden>
-          <p>本账号保留最近八轮讨论。开始新对话或重载插件会清空讨论和待审建议。已采用的规则保存在插件配置中。</p>
+          <p>开始新对话会归档当前讨论和待审建议。所有轮次仍可在下方「优化记录」查看。</p>
           <div class="actions"><button type="button" id="reset-confirm">开始新对话</button><button type="button" id="reset-cancel">取消</button></div>
         </div>
         <div id="conversation" aria-label="对话记录" tabindex="0">
@@ -130,16 +149,38 @@ mark { color: var(--amber); background: var(--cream); }
               <label for="provider">讨论模型<select id="provider" required></select></label>
               <label class="check"><input type="checkbox" id="use-cases"> 本轮引用卦例库</label>
             </div>
-            <label id="case-options" for="serials" hidden>指定卦例编号（选填）
-              <input id="serials" type="text" maxlength="80" placeholder="例如 233，305" aria-describedby="case-hint">
-              <small id="case-hint">留空会检索最多 3 个有实际反馈的卦例。引用的排盘、原断与反馈会发送给所选模型。</small>
-            </label>
+            <div id="case-options" hidden>
+              <label for="serials">本轮卦例编号（最多 3 个）
+                <input id="serials" type="text" maxlength="80" placeholder="例如 233，305" aria-describedby="case-hint">
+              </label>
+              <small id="case-hint">可直接填写或从下方勾选。留空会按讨论内容匹配已反馈卦例。发送时，所选模型会收到引用的排盘、原断与反馈。</small>
+              <details class="collection" id="case-picker">
+                <summary>筛选卦例</summary>
+                <div class="filters">
+                  <label for="case-search">关键词<input type="search" id="case-search" maxlength="200" placeholder="搜索编号、问题、卦名、断语或反馈"></label>
+                  <label for="case-intent">问卦方向<select id="case-intent"><option value="">全部方向</option></select></label>
+                  <label for="case-feedback">反馈情况
+                    <select id="case-feedback">
+                      <option value="verified">全部已反馈</option><option>未应验</option><option>部分应验</option><option>应验</option><option>进行中</option><option>未分类</option>
+                      <option value="unverified">无有效反馈</option><option value="all">全部卦例</option>
+                    </select>
+                  </label>
+                  <button type="button" id="case-find">查询</button>
+                </div>
+                <div class="items"></div><div class="paging" aria-live="polite"></div>
+              </details>
+            </div>
             <label for="message">讨论内容
               <textarea id="message" rows="3" maxlength="6000" required placeholder="例如：这次把口头承诺断成了签约，应该怎样修改判断依据？"></textarea>
             </label>
             <div class="send-row"><small>可粘贴对话，Ctrl / ⌘ + Enter 发送。</small><button class="primary" type="submit" id="send" disabled>发送</button></div>
           </fieldset>
         </form>
+        <details class="collection archive" id="round-history">
+          <summary>优化记录</summary>
+          <p class="scope">本账号的历次讨论、引用卦例和逐项审核结果。</p>
+          <div class="items"></div><div class="paging" aria-live="polite"></div>
+        </details>
       </section>
       <section class="panel logic" id="logic" aria-labelledby="logic-title">
         <div class="panel-head"><h2 id="logic-title">当前解卦逻辑</h2></div>
@@ -148,6 +189,10 @@ mark { color: var(--amber); background: var(--cream); }
           <p id="section-scope" class="scope"></p>
           <div id="rule-text" tabindex="0" aria-label="生效原文"></div>
         </div>
+        <details class="collection archive" id="version-history" hidden>
+          <summary>提示词版本历史</summary>
+          <div class="items"></div><div class="paging" aria-live="polite"></div>
+        </details>
       </section>
     </div>`;
   startWorkshop(root, bridge);
@@ -157,7 +202,15 @@ export function startWorkshop(root, bridge) {
   const $ = (id) => root.getElementById(id);
   const statusNames = {
     pending: "待确认", approved: "已采用", dismissed: "已放弃", stale: "原文已变化，请重新讨论",
+    archived: "已归档，未采用",
   };
+  const roundNames = { running: "处理中", done: "已完成", failed: "失败", interrupted: "已中断" };
+  const versionNames = { initial: "初始版本", config: "检测到配置变更", workshop: "协同优化" };
+  const dateFormat = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const time = (value) => dateFormat.format(new Date(value));
   let state;
   let busy = false;
 
@@ -202,7 +255,9 @@ export function startWorkshop(root, bridge) {
     if (template && !template.text.includes("{chart}") && key !== "command_interpretation_prompt" && key !== "guardrail") {
       scope = "当前解卦提示词未包含 {chart}。将该变量加回提示词后，常规解卦才能收到本节内容。";
     }
-    $("section-scope").textContent = scope;
+    const version = state.versions?.[key];
+    $("section-scope").textContent = (version ? "当前 V" + version + " · " : "") + scope;
+    $("version-history").hidden = !rule.editable;
     const box = $("rule-text");
     const at = highlight ? rule.text.indexOf(highlight) : -1;
     if (at < 0) {
@@ -216,33 +271,45 @@ export function startWorkshop(root, bridge) {
   }
 
   function showSection(key, snippet, scroll = false) {
+    const changed = $("section").value !== key;
     $("section").value = key;
     renderRule(snippet);
+    if (changed) versionList.load();
     if (scroll) {
       $("logic").scrollIntoView({ block: "nearest" });
       $("rule-text").focus({ preventScroll: true });
     }
   }
 
-  function proposal(change) {
-    const card = element("section", "", "proposal");
-    const head = element("div", "", "proposal-head");
-    head.append(element("h3", state.sections[change.section].label),
-      element("span", statusNames[change.status], "state " + change.status));
+  function comparison(oldLabel, before, newLabel, after) {
     const diff = element("div", "", "comparison");
-    for (const [label, value] of [["修改前", change.before], ["建议改为", change.after || "（删除此段）"]]) {
+    for (const [label, value] of [[oldLabel, before], [newLabel, after]]) {
       const part = element("div");
       part.append(element("strong", label), element("p", value, "message"));
       diff.append(part);
     }
+    return diff;
+  }
+
+  function proposal(change, reviewable = true) {
+    const card = element("section", "", "proposal");
+    const head = element("div", "", "proposal-head");
+    head.append(element("h3", state.sections[change.section]?.label || change.section),
+      element("span", statusNames[change.status], "state " + change.status));
+    const diff = comparison("修改前", change.before, "建议改为", change.after || "（删除此段）");
     const actions = element("div", "", "actions");
-    actions.append(button("查看所在章节", () => showSection(change.section,
+    if (reviewable) actions.append(button("查看所在章节", () => showSection(change.section,
       change.status === "approved" ? change.after : change.before, true)));
-    if (change.status === "pending") {
+    if (reviewable && change.status === "pending") {
       actions.append(button("确认采用此项", () => decide(change, "approve"), "primary decision"),
         button("放弃此项", () => decide(change, "dismiss"), "decision"));
     }
     card.append(head, element("p", change.reason, "reason"), diff, actions);
+    if (change.decided_at) card.append(element("small", time(change.decided_at)
+      + (change.version ? " · V" + change.base_version + " → V" + change.version : "")));
+    if (!reviewable && change.version) {
+      card.append(versionDisclosure(change.section, change.version, "查看采用后的 V" + change.version + " 全文"));
+    }
     return card;
   }
 
@@ -265,6 +332,145 @@ export function startWorkshop(root, bridge) {
     return details;
   }
 
+  function disclosure(title, getBody) {
+    const details = element("details", "", "record");
+    const body = element("div", "", "record-body");
+    details.append(element("summary", title), body);
+    let loaded = false;
+    details.addEventListener("toggle", async () => {
+      if (!details.open || loaded) return;
+      loaded = true;
+      body.textContent = "正在读取…";
+      try {
+        body.replaceChildren(await getBody());
+      } catch (error) {
+        loaded = false;
+        body.textContent = (error.message || "读取失败") + "，收起后可重新展开。";
+      }
+    });
+    return details;
+  }
+
+  function versionDisclosure(section, number, title, linkToRound = false) {
+    return disclosure(title, async () => {
+      const v = await bridge.apiGet("optimize/versions", { section, number });
+      const body = element("div");
+      if (v.source === "workshop") {
+        body.append(element("p", "优化记录 #" + v.turn_id + " · " + v.reason, "reason"),
+          comparison("修改前", v.before, "修改后", v.after || "（删除此段）"));
+        if (linkToRound && v.can_view_turn) {
+          body.append(disclosure("查看优化记录 #" + v.turn_id, () => roundBody(v.turn_id)));
+        }
+      } else if (v.previous != null) {
+        if (v.diff) body.append(element("strong", "与上一版的差异"), element("p", v.diff, "message rule-copy"));
+        const previous = element("details");
+        previous.append(element("summary", "查看上一版全文"), element("p", v.previous, "message"));
+        body.append(previous);
+      }
+      body.append(element("strong", "V" + v.number + " 全文"), element("p", v.text, "message rule-copy"));
+      return body;
+    });
+  }
+
+  function historyRow(item) {
+    const status = item.status === "done"
+      ? (item.proposals ? "建议 " + item.proposals + " 项，已采用 " + item.approved + " 项" : "仅讨论")
+      : roundNames[item.status];
+    return disclosure(["#" + item.id, time(item.at), status, item.message].join(" · "), () => roundBody(item.id));
+  }
+
+  async function roundBody(id) {
+    const turn = await bridge.apiGet("optimize/history", { id });
+    const body = element("div");
+    body.append(element("p", [turn.actor, turn.provider, state.sections[turn.focus]?.label || turn.focus].join(" · "), "byline"),
+      element("p", turn.message, "message ask"));
+    if (turn.use_cases) body.append(sources(turn));
+    if (turn.reply) body.append(element("p", turn.reply, "message"));
+    if (turn.status === "done" && !turn.changes.length) body.append(element("small", "本轮仅讨论"));
+    for (const change of turn.changes) body.append(proposal(change, false));
+    const bases = element("details");
+    bases.append(element("summary", "本轮使用的提示词"));
+    for (const [section, number] of Object.entries(turn.versions)) {
+      bases.append(versionDisclosure(section, number, (state.sections[section]?.label || section) + " · V" + number));
+    }
+    body.append(bases);
+    return body;
+  }
+
+  function pagedList(id, fetchPage, row, empty) {
+    const panel = $(id);
+    const items = panel.querySelector(".items"), paging = panel.querySelector(".paging");
+    let generation = 0, page = 1;
+    async function load(target = 1) {
+      const request = ++generation;
+      if (!panel.open || panel.hidden || !state) return;
+      items.replaceChildren();
+      paging.textContent = "正在读取…";
+      try {
+        const data = await fetchPage(target);
+        if (generation !== request) return;
+        page = data.page;
+        items.replaceChildren(...data.items.map(row));
+        const previous = button("上一页", () => load(page - 1)), next = button("下一页", () => load(page + 1));
+        previous.disabled = page <= 1;
+        next.disabled = page >= data.pages;
+        paging.replaceChildren(element("small", data.total ? "共 " + data.total + " 条 · " + page + " / " + data.pages + " 页" : empty));
+        if (data.pages > 1) paging.append(previous, next);
+      } catch (error) {
+        if (generation === request) paging.replaceChildren(element("span", error.message || "读取失败"), button("重试", () => load(target)));
+      }
+    }
+    panel.addEventListener("toggle", () => load());
+    return { load, refresh: () => load(page) };
+  }
+
+  function caseRow(item) {
+    const label = element("label", "", "case-choice");
+    const check = element("input");
+    check.type = "checkbox";
+    check.value = String(item.serial);
+    const parts = [item.direction, [item.primary, item.changed !== item.primary && item.changed].filter(Boolean).join(" → "),
+      item.outcomes.length ? item.outcomes.join("、") : "无有效反馈"];
+    const desc = element("span");
+    desc.append(element("strong", "#" + item.serial + " · " + (item.question || "未记录问题")),
+      element("small", parts.filter(Boolean).join(" · ")));
+    label.append(check, desc);
+    markCase(check);
+    check.addEventListener("change", () => {
+      try {
+        const selected = new Set(readSerials());
+        if (check.checked) selected.add(item.serial);
+        else selected.delete(item.serial);
+        if (selected.size > 3) throw new Error("每轮最多可引用 3 个卦例。");
+        $("serials").value = [...selected].map((n) => "#" + n).join("，");
+        notice("");
+      } catch (error) { notice(error.message, true); }
+      syncChecks();
+    });
+    return label;
+  }
+
+  function markCase(check) {
+    let selected = [];
+    try { selected = readSerials(); } catch { /* Keep the manual input available for correction. */ }
+    check.checked = selected.includes(Number(check.value));
+    check.disabled = !check.checked && selected.length >= 3;
+  }
+
+  function syncChecks() {
+    for (const check of $("case-picker").querySelectorAll('input[type="checkbox"]')) markCase(check);
+  }
+
+  const caseList = pagedList("case-picker", (page) => bridge.apiGet("optimize/cases", {
+    page, search: $("case-search").value.trim(), intent: $("case-intent").value, feedback: $("case-feedback").value,
+  }), caseRow, "没有符合条件的卦例");
+  const roundList = pagedList("round-history", (page) => bridge.apiGet("optimize/history", { page }),
+    historyRow, "还没有优化记录");
+  const versionList = pagedList("version-history", (page) => bridge.apiGet("optimize/versions", { page, section: $("section").value }),
+    (v) => versionDisclosure($("section").value, v.number,
+      ["V" + v.number, versionNames[v.source], v.actor, time(v.at)].filter(Boolean).join(" · "), true),
+    "还没有提示词版本");
+
   function display(snapshot) {
     const selected = $("section").value;
     const oldTop = $("conversation").scrollTop;
@@ -277,7 +483,16 @@ export function startWorkshop(root, bridge) {
     $("section").replaceChildren(editable, fixed);
     $("section").disabled = false;
     if (Object.hasOwn(state.sections, selected)) $("section").value = selected;
+    if (snapshot.directions) {
+      const intent = $("case-intent");
+      const old = intent.value;
+      intent.replaceChildren(new Option("全部方向", ""));
+      for (const [key, label] of Object.entries(snapshot.directions)) intent.append(new Option(label, key));
+      intent.value = old;
+    }
     renderRule();
+    roundList.refresh();
+    versionList.refresh();
     const log = $("conversation");
     log.replaceChildren();
     if (!state.turns.length) {
@@ -339,10 +554,10 @@ export function startWorkshop(root, bridge) {
   function readSerials() {
     if (!$("use-cases").checked || !$("serials").value.trim()) return [];
     const tokens = $("serials").value.trim().split(/[\s,，、]+/);
-    if (tokens.length > 3 || tokens.some((s) => !/^[#＃]?[0-9]{1,12}$/.test(s))) {
+    if (tokens.length > 3 || tokens.some((s) => !/^[#＃]?[0-9]{1,12}$/.test(s) || Number(s.replace(/^[#＃]/, "")) < 1)) {
       throw new Error("请输入最多 3 个卦例编号，用空格或逗号分隔。");
     }
-    return tokens.map((s) => Number(s.replace(/^[#＃]/, "")));
+    return [...new Set(tokens.map((s) => Number(s.replace(/^[#＃]/, ""))))];
   }
 
   async function send(event) {
@@ -404,14 +619,24 @@ export function startWorkshop(root, bridge) {
       if (!$("send").disabled) $("chat-form").requestSubmit();
     }
   });
-  $("use-cases").addEventListener("change", () => { $("case-options").hidden = !$("use-cases").checked; });
-  $("section").addEventListener("change", () => renderRule());
+  $("use-cases").addEventListener("change", () => {
+    $("case-options").hidden = !$("use-cases").checked;
+    if ($("use-cases").checked && $("case-picker").open) caseList.refresh();
+  });
+  $("serials").addEventListener("input", syncChecks);
+  $("case-find").addEventListener("click", () => caseList.load());
+  $("case-search").addEventListener("keydown", (event) => {
+    if (!event.isComposing && event.key === "Enter") { event.preventDefault(); caseList.load(); }
+  });
+  for (const id of ["case-intent", "case-feedback"]) $(id).addEventListener("change", () => caseList.load());
+  $("section").addEventListener("change", () => { renderRule(); versionList.load(); });
   $("new-chat").addEventListener("click", () => { $("reset-panel").hidden = false; });
   $("reset-cancel").addEventListener("click", () => { $("reset-panel").hidden = true; });
   $("reset-confirm").addEventListener("click", () => run(async () => {
     display(await bridge.apiPost("optimize/reset", { revision: state.revision }));
     $("message").value = $("serials").value = "";
     $("use-cases").checked = false;
+    $("case-picker").open = false;
     $("case-options").hidden = $("reset-panel").hidden = true;
     notice("已开始新对话。");
   }));

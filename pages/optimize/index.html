@@ -17,7 +17,7 @@
       <section class="panel chat" aria-labelledby="chat-title">
         <div class="panel-head"><h2 id="chat-title">复盘对话</h2><button type="button" id="new-chat" class="quiet" disabled>新对话</button></div>
         <div id="reset-panel" class="reset-panel" hidden>
-          <p>本账号保留最近八轮讨论。开始新对话或重载插件会清空讨论和待审建议。已采用的规则保存在插件配置中。</p>
+          <p>开始新对话会归档当前讨论和待审建议。所有轮次仍可在下方「优化记录」查看。</p>
           <div class="actions"><button type="button" id="reset-confirm">开始新对话</button><button type="button" id="reset-cancel">取消</button></div>
         </div>
         <div id="conversation" aria-label="对话记录" tabindex="0">
@@ -29,16 +29,38 @@
               <label for="provider">讨论模型<select id="provider" required></select></label>
               <label class="check"><input type="checkbox" id="use-cases"> 本轮引用卦例库</label>
             </div>
-            <label id="case-options" for="serials" hidden>指定卦例编号（选填）
-              <input id="serials" type="text" maxlength="80" placeholder="例如 233，305" aria-describedby="case-hint">
-              <small id="case-hint">留空会检索最多 3 个有实际反馈的卦例。引用的排盘、原断与反馈会发送给所选模型。</small>
-            </label>
+            <div id="case-options" hidden>
+              <label for="serials">本轮卦例编号（最多 3 个）
+                <input id="serials" type="text" maxlength="80" placeholder="例如 233，305" aria-describedby="case-hint">
+              </label>
+              <small id="case-hint">可直接填写或从下方勾选。留空会按讨论内容匹配已反馈卦例。发送时，所选模型会收到引用的排盘、原断与反馈。</small>
+              <details class="collection" id="case-picker">
+                <summary>筛选卦例</summary>
+                <div class="filters">
+                  <label for="case-search">关键词<input type="search" id="case-search" maxlength="200" placeholder="搜索编号、问题、卦名、断语或反馈"></label>
+                  <label for="case-intent">问卦方向<select id="case-intent"><option value="">全部方向</option></select></label>
+                  <label for="case-feedback">反馈情况
+                    <select id="case-feedback">
+                      <option value="verified">全部已反馈</option><option>未应验</option><option>部分应验</option><option>应验</option><option>进行中</option><option>未分类</option>
+                      <option value="unverified">无有效反馈</option><option value="all">全部卦例</option>
+                    </select>
+                  </label>
+                  <button type="button" id="case-find">查询</button>
+                </div>
+                <div class="items"></div><div class="paging" aria-live="polite"></div>
+              </details>
+            </div>
             <label for="message">讨论内容
               <textarea id="message" rows="3" maxlength="6000" required placeholder="例如：这次把口头承诺断成了签约，应该怎样修改判断依据？"></textarea>
             </label>
             <div class="send-row"><small>可粘贴对话，Ctrl / ⌘ + Enter 发送。</small><button class="primary" type="submit" id="send" disabled>发送</button></div>
           </fieldset>
         </form>
+        <details class="collection archive" id="round-history">
+          <summary>优化记录</summary>
+          <p class="scope">本账号的历次讨论、引用卦例和逐项审核结果。</p>
+          <div class="items"></div><div class="paging" aria-live="polite"></div>
+        </details>
       </section>
       <section class="panel logic" id="logic" aria-labelledby="logic-title">
         <div class="panel-head"><h2 id="logic-title">当前解卦逻辑</h2></div>
@@ -47,6 +69,10 @@
           <p id="section-scope" class="scope"></p>
           <div id="rule-text" tabindex="0" aria-label="生效原文"></div>
         </div>
+        <details class="collection archive" id="version-history" hidden>
+          <summary>提示词版本历史</summary>
+          <div class="items"></div><div class="paging" aria-live="polite"></div>
+        </details>
       </section>
     </div>
   </main>

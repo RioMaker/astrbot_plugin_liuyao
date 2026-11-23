@@ -7,26 +7,28 @@ import hashlib
 import json
 import re
 from contextlib import suppress
-from dataclasses import dataclass, field
 from uuid import uuid4
 
 from astrbot.api import logger
 
 if __package__:
-    from .case_library import normalize_case_store, search_cases
+    from .case_library import feedback_with_text, normalize_case_store, search_cases
     from .divination import infer_intent
+    from .feedback_review import OUTCOMES
     from .paipan import chart_text
     from .prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_SECTIONS
     from .user_management import CASES_KEY, ManagementError, require_text
+    from .workshop_history import WorkshopHistory, history_path
 else:
-    from case_library import normalize_case_store, search_cases
+    from case_library import feedback_with_text, normalize_case_store, search_cases
     from divination import infer_intent
+    from feedback_review import OUTCOMES
     from paipan import chart_text
     from prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_SECTIONS
     from user_management import CASES_KEY, ManagementError, require_text
+    from workshop_history import WorkshopHistory, history_path
 
 
-MAX_TURNS = 8
 MAX_CASES = 3
 VARIABLE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
 WORKSHOP_INSTRUCTIONS = (
@@ -40,19 +42,6 @@ WORKSHOP_INSTRUCTIONS = (
     '[{"section":"可编辑章节的键","before":"原文","after":"替换文本","reason":"修改依据"}]}。'
     "普通讨论返回空 changes 数组。"
 )
-
-
-@dataclass
-class WorkshopSession:
-    turns: list[dict] = field(default_factory=list)
-    revision: str = field(default_factory=lambda: uuid4().hex)
-    busy: bool = False
-
-    def check(self, revision):
-        if self.busy:
-            raise ManagementError("上一轮对话正在处理，请稍后刷新", 409)
-        if revision != self.revision:
-            raise ManagementError("对话已更新，请刷新后重试", 409)
 
 
 def _digest(text: str) -> str:
@@ -76,9 +65,8 @@ def _case_material(case: dict) -> dict:
     with suppress(KeyError, IndexError, TypeError):
         facts.append(chart_text(cast["chart"], show_changed=bool(cast.get("moving_lines"))))
     feedback = [
-        _excerpt(row["text"], 500)
-        for row in case.get("feedback") or []
-        if isinstance(row, dict) and row.get("valid") is not False and row.get("text")
+        (str(row["outcome"]) + " · " if row.get("outcome") else "") + _excerpt(row["text"], 500)
+        for row in feedback_with_text(case)
     ]
     return {
         "serial": case["serial"],
@@ -170,19 +158,38 @@ class InterpretationWorkshopMixin:
             }
         return sections
 
-    def _workshop_session(self, actor):
-        if actor not in self._workshop_sessions:
-            self._workshop_sessions[actor] = WorkshopSession()
-        return self._workshop_sessions[actor]
+    def _journal(self):
+        if self._workshop_history is None:
+            try:
+                self._workshop_history = WorkshopHistory(history_path())
+            except OSError as exc:
+                raise ManagementError(
+                    "无法打开优化记录，请检查插件数据目录的写入权限", 503
+                ) from exc
+        return self._workshop_history
 
-    def _workshop_snapshot(self, session):
+    def _workshop_versions(self):
+        return self._journal().sync_versions(
+            {
+                key: self._prompt_template(key, default)
+                for key, (_, default) in INTERPRETATION_SECTIONS.items()
+            }
+        )
+
+    def _workshop_snapshot(self, actor):
         sections = self._workshop_sections()
-        for turn in session.turns:
-            for change in turn["changes"]:
-                current = sections[change["section"]]["text"]
-                if change["status"] == "pending" and change["base"] != _digest(current):
-                    change["status"] = "stale"
-        return {"sections": sections, "turns": session.turns, "revision": session.revision}
+        versions = self._journal().sync_versions(
+            {key: sections[key]["text"] for key in INTERPRETATION_SECTIONS}
+        )
+        return self._journal().conversation(actor) | {"sections": sections, "versions": versions}
+
+    def _checked_workshop(self, actor, revision):
+        if actor in self._workshop_busy:
+            raise ManagementError("上一轮对话正在处理，请稍后刷新", 409)
+        state = self._workshop_snapshot(actor)
+        if state["revision"] != revision:
+            raise ManagementError("对话已更新，请刷新后重试", 409)
+        return state
 
     async def _page_workshop(self, *, query, actor):
         providers = (
@@ -193,12 +200,89 @@ class InterpretationWorkshopMixin:
         preferred = self._config_get("admin_interpretation_provider_id", "") or self._config_get(
             "command_interpretation_provider_id", ""
         )
-        session = self._workshop_session(actor)
-        return self._workshop_snapshot(session) | {
+        return self._workshop_snapshot(actor) | {
             "providers": providers,
             "preferred": preferred,
-            "processing": session.busy,
+            "processing": actor in self._workshop_busy,
+            "directions": {k: v["label"] for k, v in self.readings.directions.items()},
         }
+
+    async def _page_workshop_cases(self, *, query, actor):
+        search, page = self._page_options(query)
+        serial = re.fullmatch(r"[#＃]([0-9]{1,12})", search)
+        selected_number = int(serial[1]) if serial else None
+        if serial:
+            search = ""
+        intent = query.get("intent", "")
+        outcome = query.get("feedback", "verified")
+        if intent and intent not in self.readings.directions:
+            raise ManagementError("未知卦例方向")
+        if outcome not in {"all", "verified", "unverified", *OUTCOMES}:
+            raise ManagementError("未知反馈筛选条件")
+        rows = []
+        for case in normalize_case_store(await self.get_kv_data(CASES_KEY, {})):
+            if selected_number is not None and case["serial"] != selected_number:
+                continue
+            direction = str(case.get("intent") or "general")
+            if intent and direction != intent:
+                continue
+            feedback = feedback_with_text(case)
+            outcomes = list(dict.fromkeys(str(f.get("outcome") or "未分类") for f in feedback))
+            if (
+                (outcome == "verified" and not feedback)
+                or (outcome == "unverified" and feedback)
+                or (outcome in OUTCOMES and outcome not in outcomes)
+            ):
+                continue
+            cast = case.get("cast") if isinstance(case.get("cast"), dict) else {}
+            question = str(case.get("analysis_question") or case.get("question") or "")
+            primary, changed = (
+                str(cast.get("primary_name") or ""),
+                str(cast.get("changed_name") or ""),
+            )
+            if search and not any(
+                search in str(field).lower()
+                for field in (
+                    f"{case['serial']:03d}",
+                    question,
+                    case.get("question") or "",
+                    primary,
+                    changed,
+                    case.get("verdict") or "",
+                    *(f["text"] for f in feedback),
+                )
+            ):
+                continue
+            rows.append(
+                {
+                    "serial": case["serial"],
+                    "question": _excerpt(question, 160),
+                    "direction": self.readings.directions.get(direction, {}).get(
+                        "label", direction
+                    ),
+                    "primary": primary,
+                    "changed": changed,
+                    "outcomes": outcomes,
+                }
+            )
+        rows.sort(key=lambda row: row["serial"], reverse=True)
+        return self._page_result(rows, page)
+
+    async def _page_workshop_history(self, *, query, actor):
+        self._workshop_versions()
+        if "id" in query:
+            return self._journal().history_detail(actor, query["id"])
+        return self._journal().history(actor, self._page_options(query)[1])
+
+    async def _page_workshop_versions(self, *, query, actor):
+        section = require_text(query.get("section"), "提示词章节", 80)
+        self._workshop_versions()
+        if "number" in query:
+            detail = self._journal().version_detail(section, query["number"])
+            return detail | {"can_view_turn": detail["actor"] == actor}
+        if section not in INTERPRETATION_SECTIONS:
+            raise ManagementError("请选择可编辑的提示词章节")
+        return self._journal().versions(section, self._page_options(query)[1])
 
     async def _workshop_cases(self, message, use_cases, serials):
         if type(use_cases) is not bool or not isinstance(serials, list) or len(serials) > MAX_CASES:
@@ -228,24 +312,24 @@ class InterpretationWorkshopMixin:
         return [_case_material(case) for case in selected]
 
     async def _admin_workshop_chat(self, *, payload, actor):
-        session = self._workshop_session(actor)
-        session.check(payload.get("revision"))
+        state = self._checked_workshop(actor, payload.get("revision"))
         message = require_text(payload.get("message"), "对话内容", 6000)
         provider = require_text(payload.get("provider"), "聊天模型", 256)
         if provider not in {p["id"] for p in self._model_choices()}:
             raise ManagementError("聊天模型已不可用，请刷新后重新选择")
-        sections = self._workshop_snapshot(session)["sections"]
+        sections = state["sections"]
         focus = require_text(payload.get("focus"), "讨论章节", 80)
         if focus not in sections:
             raise ManagementError("未知的解卦章节")
         rules = {key: sections[key]["text"] for key in INTERPRETATION_SECTIONS}
-        session.busy = True
+        self._workshop_busy.add(actor)
+        turn_id = None
         try:
             use_cases = payload.get("use_cases", False)
             cases = await self._workshop_cases(message, use_cases, payload.get("serials", []))
             history = []
             size = 0
-            for turn in reversed(session.turns):
+            for turn in reversed(state["turns"]):
                 entry = {key: turn[key] for key in ("message", "reply", "cases")}
                 entry["changes"] = [
                     {key: change[key] for key in ("section", "before", "after", "reason", "status")}
@@ -270,6 +354,16 @@ class InterpretationWorkshopMixin:
                 "本轮卦例": cases,
                 "本轮问题": message,
             }
+            turn_id = self._journal().start(
+                actor,
+                provider=provider,
+                focus=focus,
+                message=message,
+                cases=cases,
+                use_cases=use_cases,
+                request_revision=state["revision"],
+                versions=state["versions"],
+            )
             token_run = self._new_token_run(None, kind="workshop")
             try:
                 response = await asyncio.wait_for(
@@ -292,31 +386,28 @@ class InterpretationWorkshopMixin:
                 logger.warning("liuyao：解卦优化模型调用失败（%s）", type(exc).__name__)
                 raise ManagementError("模型调用失败，请检查所选聊天模型后重试", 502) from exc
             reply, changes = _model_reply(response, rules)
-            session.turns.append(
-                {
-                    "request_revision": session.revision,
-                    "message": message,
-                    "reply": reply,
-                    "provider": provider,
-                    "changes": changes,
-                    "cases": cases,
-                    "use_cases": use_cases,
-                }
-            )
-            del session.turns[:-MAX_TURNS]
-            session.revision = uuid4().hex
-            return self._workshop_snapshot(session)
+            self._journal().finish(turn_id, actor, reply, changes, state["versions"])
+            return self._workshop_snapshot(actor)
+        except asyncio.CancelledError:
+            if turn_id is not None:
+                self._journal().fail(turn_id, "本轮请求已中断。", interrupted=True)
+            raise
+        except Exception as exc:
+            if turn_id is not None:
+                detail = str(exc) if isinstance(exc, ManagementError) else "本轮优化处理失败。"
+                self._journal().fail(turn_id, detail)
+            raise
         finally:
-            session.busy = False
+            self._workshop_busy.discard(actor)
 
     async def _admin_workshop_decide(self, *, payload, actor):
         if set(payload) != {"id", "action"} or payload["action"] not in ("approve", "dismiss"):
             raise ManagementError("请逐项选择确认采用或放弃建议")
-        session = self._workshop_session(actor)
+        state = self._workshop_snapshot(actor)
         change = next(
             (
                 item
-                for turn in session.turns
+                for turn in state["turns"]
                 for item in turn["changes"]
                 if item["id"] == payload["id"]
             ),
@@ -326,19 +417,20 @@ class InterpretationWorkshopMixin:
             raise ManagementError("找不到当前账号的待审建议，请刷新页面", 404)
         status = "approved" if payload["action"] == "approve" else "dismissed"
         if change["status"] == status:
-            return self._workshop_snapshot(session)
-        if session.busy or change["status"] != "pending":
+            return state
+        if actor in self._workshop_busy or change["status"] != "pending":
             raise ManagementError("对话处理中或建议状态已变化，请刷新后核对", 409)
         if status == "approved":
             key = change["section"]
             current = self._prompt_template(key, INTERPRETATION_SECTIONS[key][1])
             if change["base"] != _digest(current):
-                change["status"] = "stale"
                 raise ManagementError("本节原文已变化，请按最新逻辑重新生成建议", 409)
             saver = getattr(self.config, "save_config", None)
             if not callable(saver):
                 raise ManagementError("当前 AstrBot 配置无法持久保存", 503)
-            # No await between comparing the live section, saving and consuming this draft.
+            # Persist intent before writing the separate AstrBot config. A lost response
+            # or process restart can then reconcile the exact version without applying twice.
+            self._journal().decide(change["id"], actor, "applying")
             existed, previous = key in self.config, self.config.get(key)
             try:
                 self.config[key] = current.replace(change["before"], change["after"], 1).strip()
@@ -349,11 +441,11 @@ class InterpretationWorkshopMixin:
                 else:
                     self.config.pop(key, None)
                 raise ManagementError("配置保存失败，原规则已保留，可重试确认", 500) from exc
-        change["status"] = status
-        session.revision = uuid4().hex
-        return self._workshop_snapshot(session)
+        else:
+            self._journal().decide(change["id"], actor, status)
+        return self._workshop_snapshot(actor)
 
     async def _admin_workshop_reset(self, *, payload, actor):
-        self._workshop_session(actor).check(payload.get("revision"))
-        self._workshop_sessions[actor] = session = WorkshopSession()
-        return self._workshop_snapshot(session)
+        self._checked_workshop(actor, payload.get("revision"))
+        self._journal().reset(actor)
+        return self._workshop_snapshot(actor)

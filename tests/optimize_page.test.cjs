@@ -22,20 +22,48 @@ function installBridge() {
   ];
   const state = {
     revision: "1", turns: [], providers: [{ id: "model", model: "M" }], preferred: "model",
+    versions: { general: 1, weather: 1 }, directions: { career: "事业", weather: "天气" },
     sections: {
       general: { label: "通用研判规则", text: "前文\n原规则\n后文", editable: true },
       weather: { label: "天气研判规则", text: "参考时段", editable: true },
       reference: { label: "分类参考 · 通则", text: "来源文献", editable: false },
     },
   };
+  const at = "2026-11-23T10:30:00+08:00";
+  const records = [];
+  const versions = Object.fromEntries(["general", "weather"].map((section) => [section, [
+    { number: 1, at, source: "initial", text: state.sections[section].text },
+  ]]));
   window.posts = [];
   window.reads = [];
+  window.caseQueries = [];
   window.AstrBotPluginPage = {
     ready: async () => {},
-    apiGet: async (endpoint) => {
+    apiGet: async (endpoint, query = {}) => {
       window.reads.push(endpoint);
       if (endpoint === "optimize/state") return structuredClone(state);
       const list = { items: [], page: 1, pages: 1, total: 0 };
+      if (endpoint === "optimize/cases") {
+        window.caseQueries.push(query);
+        if (query.search && query.search !== "合同") return list;
+        const cases = Array.from({ length: 22 }, (_, i) => ({
+          serial: 233 - i, question: "合同进度 " + (233 - i), direction: "事业", primary: "乾",
+          changed: "泰", outcomes: ["未应验"],
+        }));
+        const page = query.page;
+        return { total: 22, pages: 2, page, items: cases.slice((page - 1) * 20, page * 20) };
+      }
+      if (endpoint === "optimize/history") {
+        if (query.id) return structuredClone(records.find((r) => r.id === query.id));
+        return { ...list, total: records.length, items: records.slice().reverse().map((turn) => ({
+          ...turn, proposals: turn.changes.length, approved: turn.changes.filter((c) => c.status === "approved").length,
+        })) };
+      }
+      if (endpoint === "optimize/versions") {
+        const rows = versions[query.section];
+        if (query.number) return structuredClone(rows.find((v) => v.number === query.number));
+        return { ...list, total: rows.length, items: structuredClone(rows.slice().reverse()) };
+      }
       if (endpoint === "manage/users") return { ...list, stats: { users: 0, banned: 0, casts: 0 } };
       if (endpoint === "manage/cases") return { ...list, all_count: 0 };
       if (endpoint === "manage/usage") return { ...list, overview: {}, summary: { casts: 0 } };
@@ -45,17 +73,27 @@ function installBridge() {
       window.posts.push({ endpoint, payload });
       if (endpoint === "optimize/chat") {
         state.turns.push({
+          id: records.length + 1, actor: "admin", at, status: "done", versions: { ...state.versions }, focus: payload.focus,
           request_revision: payload.revision, message: payload.message, reply: "复盘回复 <img src=x>", provider: "model", changes,
           use_cases: payload.use_cases, cases: payload.use_cases ? [{
             serial: 233, question: "已签约吗", chart: "原盘", reading: "原断", verdict: "会签约",
             feedback: ["只有口头意向"], answer: "",
           }] : [],
         });
+        records.push(state.turns.at(-1));
       } else if (endpoint === "optimize/decision") {
         const change = changes.find((s) => s.id === payload.id);
         if (payload.action === "approve") {
+          const previous = state.sections[change.section].text;
           state.sections[change.section].text = state.sections[change.section].text.replace(change.before, change.after);
           change.status = "approved";
+          change.decided_at = at;
+          change.base_version = state.versions[change.section];
+          change.version = ++state.versions[change.section];
+          versions[change.section].push({
+            number: change.version, at, source: "workshop", actor: "admin", previous, turn_id: 1, can_view_turn: true,
+            reason: change.reason, before: change.before, after: change.after, text: state.sections[change.section].text,
+          });
         } else change.status = "dismissed";
       } else if (endpoint === "optimize/reset") {
         state.turns = [];
@@ -226,4 +264,78 @@ test("lost chat and approval responses reconcile the saved result without anothe
   await frame.getByText("已采用此项，下次解卦将使用新规则。").waitFor();
   assert.equal(await frame.locator("#rule-text").innerText(), "前文\n核实证据\n后文");
   assert.deepEqual(await frame.evaluate(() => posts.map((p) => p.endpoint)), ["optimize/chat", "optimize/decision"]);
+});
+
+test("picker combines manual and cross-page selections and sends only those numbers", async (t) => {
+  const { frame, errors } = await open(t, 375, "manage");
+  await frame.getByRole("button", { name: "解卦优化", exact: true }).click();
+  await frame.getByLabel("本轮引用卦例库").check();
+  await frame.locator("#serials").fill("#45");
+  const picker = frame.locator("#case-picker");
+  await picker.locator("summary").click();
+  await frame.getByLabel("问卦方向").selectOption("career");
+  await frame.getByLabel("反馈情况").selectOption("未应验");
+  await frame.locator("#case-search").fill("合同");
+  await frame.locator("#case-search").press("Enter");
+  await picker.getByRole("checkbox", { name: /#233 ·/ }).check();
+  await picker.getByRole("button", { name: "下一页" }).click();
+  await picker.getByRole("checkbox", { name: /#213 ·/ }).check();
+  assert.equal(await frame.locator("#serials").inputValue(), "#45，#233，#213");
+  assert.equal(await picker.getByRole("checkbox", { name: /#212 ·/ }).isDisabled(), true);
+  await picker.getByRole("button", { name: "上一页" }).click();
+  assert.equal(await picker.getByRole("checkbox", { name: /#233 ·/ }).isChecked(), true);
+  assert.deepEqual(await frame.evaluate(() => caseQueries.at(-1)),
+    { page: 1, search: "合同", intent: "career", feedback: "未应验" });
+  await frame.locator("#case-search").fill("没有这个记录");
+  await picker.getByRole("button", { name: "查询" }).click();
+  await picker.getByText("没有符合条件的卦例").waitFor();
+  assert.equal(await frame.evaluate(() => posts.length), 0);
+  await frame.getByLabel("讨论内容").fill("复盘勾选的记录");
+  await frame.getByRole("button", { name: "发送", exact: true }).click();
+  await frame.locator(".proposal").first().waitFor();
+  assert.deepEqual(await frame.evaluate(() => posts[0].payload.serials), [45, 233, 213]);
+  assert.deepEqual(errors, []);
+});
+
+test("archived rounds and full prompt versions remain readable after starting over", async (t) => {
+  const { frame, errors } = await open(t);
+  await frame.getByLabel("本轮引用卦例库").check();
+  await frame.locator("#serials").fill("#233");
+  await frame.getByLabel("讨论内容").fill("请核实口头承诺");
+  await frame.getByRole("button", { name: "发送", exact: true }).click();
+  await frame.getByRole("button", { name: "确认采用此项" }).first().click();
+  await frame.getByText("已采用", { exact: true }).waitFor();
+  await frame.getByRole("button", { name: "放弃此项" }).click();
+  await frame.getByText("已放弃", { exact: true }).waitFor();
+  await frame.getByRole("button", { name: "新对话", exact: true }).click();
+  await frame.getByRole("button", { name: "开始新对话", exact: true }).click();
+  await frame.locator("#conversation .empty").waitFor();
+
+  const log = frame.locator("#round-history");
+  await log.locator(":scope > summary").click();
+  await log.getByText(/#1 · .*建议 2 项，已采用 1 项 · 请核实口头承诺/).click();
+  await log.getByText("已采用", { exact: true }).waitFor();
+  await log.getByText("已放弃", { exact: true }).waitFor();
+  assert.equal(await log.getByRole("button", { name: "确认采用此项" }).count(), 0);
+  await log.getByText("本轮引用卦例 #233").click();
+  assert.match(await log.locator(".source").innerText(), /只有口头意向/);
+  assert.equal(await log.locator("img").count(), 0);
+  await log.getByText("查看采用后的 V2 全文").click();
+  assert.match(await log.locator(".rule-copy").innerText(), /前文\n核实证据\n后文/);
+  await log.getByText("本轮使用的提示词").click();
+  await log.getByText("通用研判规则 · V1").click();
+  await log.getByText("前文\n原规则\n后文", { exact: true }).waitFor();
+
+  await frame.locator("#section").selectOption("general");
+  const versions = frame.locator("#version-history");
+  await versions.locator(":scope > summary").click();
+  await versions.getByText(/V2 · 协同优化 · admin/).click();
+  await versions.locator(".comparison p").first().waitFor();
+  assert.deepEqual(await versions.locator(".comparison p").allTextContents(), ["原规则", "核实证据"]);
+  assert.equal(await versions.locator(".rule-copy").innerText(), "前文\n核实证据\n后文");
+  await versions.getByText("查看优化记录 #1").click();
+  await versions.getByText("请核实口头承诺", { exact: true }).waitFor();
+  await frame.locator("#section").selectOption("reference");
+  assert.equal(await versions.isVisible(), false);
+  assert.deepEqual(errors, []);
 });
