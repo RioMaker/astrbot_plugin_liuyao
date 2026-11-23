@@ -8,6 +8,7 @@ import json
 import re
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 from astrbot.api import logger
 
@@ -41,6 +42,35 @@ def case_revision(case: dict) -> str:
 
 
 class UserManagementMixin:
+    async def _load_custom_directions(self) -> None:
+        async with self._case_lock_instance():
+            raw = await self.get_kv_data(CASES_KEY, {})
+            self.readings.set_custom_directions(
+                raw.get("custom_directions", {}) if isinstance(raw, dict) else {}
+            )
+
+    async def _admin_create_direction(self, *, payload, actor) -> dict:
+        label = require_text(payload.get("label"), "分类名称", 32)
+        description = require_text(payload.get("description", ""), "适用范围", 200, empty=True)
+        if not label.isprintable() or label in {"全部分类", "未分类"}:
+            raise ManagementError("请使用单行且可区分的分类名称")
+        async with self._case_lock_instance():
+            raw = await self.get_kv_data(CASES_KEY, serialize_case_store([]))
+            store = {"cases": raw} if isinstance(raw, list) else raw
+            custom = store.get("custom_directions", {})
+            if self.readings.normalize_intent(label, "") or any(
+                row["label"].casefold() == label.casefold() for row in custom.values()
+            ):
+                raise ManagementError("该名称或别名已有对应分类", 409)
+            key = "custom_" + uuid4().hex
+            custom = {
+                **custom,
+                key: {"label": label, "description": description, "reference": "general"},
+            }
+            await self.put_kv_data(CASES_KEY, {**store, "custom_directions": custom})
+            self.readings.set_custom_directions(custom)
+        return {"intent": key, "label": label}
+
     async def _load_user_registry(self) -> dict:
         raw = await self.get_kv_data(USERS_KEY, {})
         if not isinstance(raw, dict) or not isinstance(raw.get("users", {}), dict):
@@ -230,7 +260,7 @@ class UserManagementMixin:
     async def _admin_change_case(self, case_id: str, payload: dict, actor: str) -> dict:
         await self._ensure_user_registry()
         action = payload.get("action")
-        if action not in {"note", "delete"}:
+        if action not in {"note", "delete", "classify"}:
             raise ManagementError("未知卦例操作")
         note = require_text(payload.get("note", ""), "卦例备注", 2000, empty=True)
         async with self._feedback_lock(case_id), self._case_lock_instance():
@@ -261,11 +291,25 @@ class UserManagementMixin:
                 cases.remove(case)
                 updated = serialize_case_store(cases, saved)
             else:
-                case.update(
-                    admin_note=note,
-                    admin_updated_by=actor,
-                    updated_at=self._ai_daily_now().isoformat(),
-                )
+                at = self._ai_daily_now().isoformat()
+                if action == "classify":
+                    intent = require_text(payload.get("intent"), "卦例分类", 80)
+                    if intent not in self.readings.directions:
+                        raise ManagementError("请选择已有的卦例分类")
+                    old_key, old_label = self.readings.case_direction(case)
+                    correction = case.get("intent_correction") or {}
+                    case["intent_correction"] = {
+                        "original_intent": correction.get("original_intent", old_key),
+                        "original_label": correction.get("original_label", old_label),
+                        "by": actor,
+                        "at": at,
+                    }
+                    case.update(
+                        intent=intent, intent_label=self.readings.directions[intent]["label"]
+                    )
+                else:
+                    case["admin_note"] = note
+                case.update(admin_updated_by=actor, updated_at=at)
                 updated = serialize_case_store(cases, raw)
             await self.put_kv_data(CASES_KEY, updated)
         return {"saved": True}

@@ -39,6 +39,7 @@ KV 键尚不存在时，输出下方空库结构，不创建数据库记录。
 | --- | --- | --- |
 | `schema_version` | 整数 | 整个卦例库的结构版本，当前为 `2`，与插件版本、单条卦例版本不同。 |
 | `cases` | 对象数组 | 当前保留的完整卦例，通常按保存先后排列，显示列表可另行排序。 |
+| `custom_directions` | 对象，可选 | 自建分类的稳定键对应其名称 `label`、适用范围 `description` 和参考资料方向 `reference`。 |
 | `next_serial` | 整数 | 下次分配的全库编号，至少为现存最大编号加一，并保留历史高水位；删除或淘汰记录不会主动回退。 |
 | `user_scores` | 对象，可选 | 用户 ID → 累计审核有效反馈次数。每条卦例成功通过一次审核后加一，与预测是否应验无关。 |
 | `valid_feedback_events` | 对象，可选 | 用户 ID → 有效反馈时间字符串数组，供时间窗口内的反馈奖励统计使用。同一时刻的不同卦例可有重复时间，不能去重。 |
@@ -65,6 +66,7 @@ KV 键尚不存在时，输出下方空库结构，不创建数据库记录。
 | `caster_name` | 字符串 | 起卦时记录的用户显示名。 |
 | `intent` | 字符串 | 问卦方向键，见下方映射。 |
 | `intent_label` | 字符串 | 保存时的方向中文显示名。 |
+| `intent_correction` | 对象，可选 | 人工改类前最初的分类键、名称（`original_intent`、`original_label`），以及最近改类账号和时间（`by`、`at`）。当前分类以 `intent`、`intent_label` 为准。 |
 | `question` | 字符串 | 保存的原问题。 |
 | `method` | 字符串 | 起卦方法的显示名称。 |
 | `cast` | 对象 | 原始六爻值、卦象、卦爻辞、六亲和排盘快照，见下一节。 |
@@ -76,10 +78,10 @@ KV 键尚不存在时，输出下方空库结构，不创建数据库记录。
 | `feedback_review` | 对象，可选 | 本例独立反馈审核会话，包含审核提示词、最近上下文和最后决定。 |
 | `legacy_rejected_feedback` | 对象数组，可选 | 历史版本保存的无效反馈，在新反馈通过并写入时转存于此，便于保留历史。结构同反馈项。 |
 | `admin_note` | 字符串，可选 | 管理员备注，最多 2000 字，不覆盖原分析。 |
-| `admin_updated_by` | 字符串，可选 | 最近一次保存管理员备注的 Dashboard 登录用户名。 |
+| `admin_updated_by` | 字符串，可选 | 最近一次保存备注或人工改类的 Dashboard 登录用户名。 |
 
 方向键：`general` 综合、`career` 事业、`relationship` 感情、`wealth` 财运、
-`study` 学业、`health` 健康、`family` 家庭、`travel` 出行、`shefu` 射覆、`weather` 天气。
+`study` 学业、`health` 健康、`family` 家庭、`travel` 出行、`lost_item` 寻物、`shefu` 射覆、`weather` 天气。自建分类使用以 `custom_` 开头的键。
 实际显示名以保存的 `intent_label` 为准。
 
 时间字符串通常包含时区偏移，按其自身偏移解析；排盘历法统一换算北京时间。

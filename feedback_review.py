@@ -421,7 +421,12 @@ class FeedbackReviewMixin:
             }
         contexts = session["contexts"]
         prompt = json.dumps(
-            {"case_id": case["id"], "feedback": feedback, "answer": answer},
+            {
+                "case_id": case["id"],
+                "intent_label": self.readings.case_direction(case)[1],
+                "feedback": feedback,
+                "answer": answer,
+            },
             ensure_ascii=False,
             sort_keys=True,
         )

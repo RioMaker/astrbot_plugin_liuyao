@@ -289,6 +289,8 @@ class LiuyaoCaseStoreMixin:
                 history[position] = entry
             case["analysis_history"] = history
             case["execution_mode"] = "ai"
+            if intent and not case.get("analysis") and not case.get("intent_correction"):
+                case.update(intent=intent, intent_label=self.readings.directions[intent]["label"])
             if status == "success" and analysis and not str(case.get("analysis") or "").strip():
                 case.update(
                     analysis=analysis,
@@ -297,9 +299,6 @@ class LiuyaoCaseStoreMixin:
                     analysis_at=at,
                     original_analysis_id=entry["id"],
                 )
-                if intent:
-                    case["intent"] = intent
-                    case["intent_label"] = str(self.readings.directions[intent]["label"])
             case["status"] = (
                 "feedback_recorded"
                 if feedback_closed(case)

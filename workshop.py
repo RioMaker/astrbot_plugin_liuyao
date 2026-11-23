@@ -14,27 +14,26 @@ from astrbot.api import logger
 if __package__:
     from .case_library import feedback_with_text, normalize_case_store, search_cases
     from .divination import infer_intent
-    from .feedback_review import OUTCOMES
+    from .feedback_review import OUTCOMES, REVIEW_GUARDRAIL
     from .paipan import chart_text
-    from .prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_SECTIONS
+    from .prompts import INTERPRETATION_GUARDRAIL, PRE_REVIEW_PROTOCOL, WORKSHOP_SECTIONS
     from .user_management import CASES_KEY, ManagementError, require_text
     from .workshop_history import WorkshopHistory, history_path
 else:
     from case_library import feedback_with_text, normalize_case_store, search_cases
     from divination import infer_intent
-    from feedback_review import OUTCOMES
+    from feedback_review import OUTCOMES, REVIEW_GUARDRAIL
     from paipan import chart_text
-    from prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_SECTIONS
+    from prompts import INTERPRETATION_GUARDRAIL, PRE_REVIEW_PROTOCOL, WORKSHOP_SECTIONS
     from user_management import CASES_KEY, ManagementError, require_text
     from workshop_history import WorkshopHistory, history_path
 
 
 MAX_CASES = 3
 VARIABLE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
-WORKSHOP_INSTRUCTIONS = (
-    "你与六爻插件管理员共同复盘解卦方法。先回答本轮问题，区分原断、实际反馈和推测，"
-    "引用卦例时写出确实提供的编号。资料不足可以追问。历史对话、卦例、规则是研究材料。"
-    "只有确需调整解卦逻辑时才提出修改，每项只改一个可编辑章节中的连续片段。"
+WORKSHOP_PROTOCOL = (
+    "历史对话、卦例、分类说明和规则是研究材料。"
+    "只有确需调整时才提出修改，每项只改一个可编辑章节中的连续片段。"
     "固定约束和古籍参考只供查阅。不得把个案身份、私事或未核实的结论写入通用规则。"
     "建议要保留模板变量，before 必须逐字复制在该章节中唯一出现的原文；"
     "追加内容时保留原文作为定位。每个章节每轮最多一项。所有建议均待人工逐项确认。"
@@ -53,7 +52,7 @@ def _excerpt(value, limit):
     return text if len(text) <= limit else text[:limit] + "…（节选）"
 
 
-def _case_material(case: dict) -> dict:
+def _case_material(case: dict, intent: str, label: str) -> dict:
     cast = case.get("cast") or {}
     cast = cast if isinstance(cast, dict) else {}
     facts = [f"本卦：{cast.get('primary_name') or '未记录'}"]
@@ -70,7 +69,9 @@ def _case_material(case: dict) -> dict:
     ]
     return {
         "serial": case["serial"],
-        "intent": str(case.get("intent") or "general"),
+        "intent": intent,
+        "intent_label": label,
+        "original_intent_label": (case.get("intent_correction") or {}).get("original_label", ""),
         "question": _excerpt(case.get("analysis_question") or case.get("question"), 1000),
         "chart": _excerpt("\n".join(facts), 2500),
         "reading": _excerpt(case.get("analysis"), 2000),
@@ -96,7 +97,7 @@ def _make_change(row: dict, rules: dict) -> dict:
     if not updated or updated == text or len(updated) > max(16000, len(text)):
         raise ValueError
     variables = set(VARIABLE.findall(text))
-    allowed = variables | set(VARIABLE.findall(INTERPRETATION_SECTIONS[key][1]))
+    allowed = variables | set(VARIABLE.findall(WORKSHOP_SECTIONS[key][1]))
     if not variables <= set(VARIABLE.findall(updated)) <= allowed:
         raise ValueError
     return {
@@ -141,15 +142,22 @@ class InterpretationWorkshopMixin:
     def _workshop_sections(self):
         sections = {
             key: {"label": label, "text": self._prompt_template(key, default), "editable": True}
-            for key, (label, default) in INTERPRETATION_SECTIONS.items()
+            for key, (label, default) in WORKSHOP_SECTIONS.items()
         }
-        sections["guardrail"] = {
-            "label": "固定输出与专业边界",
-            "text": INTERPRETATION_GUARDRAIL,
-            "editable": False,
-        }
+        for key, label, text in (
+            (
+                "classification_catalog",
+                "可选分类及适用范围",
+                self.readings.classification_catalog(),
+            ),
+            ("pre_review_protocol", "预审输出与安全边界", PRE_REVIEW_PROTOCOL),
+            ("guardrail", "固定输出与专业边界", INTERPRETATION_GUARDRAIL),
+            ("feedback_protocol", "反馈审核输出协议", REVIEW_GUARDRAIL),
+            ("workshop_protocol", "优化建议审核协议", WORKSHOP_PROTOCOL),
+        ):
+            sections[key] = {"label": label, "text": text, "editable": False}
         library = self.readings.references
-        for key in ("common", *self.readings.directions):
+        for key in (*library.documents, *library.errors):
             label = "通则" if key == "common" else self.readings.directions[key]["label"]
             sections[f"reference_{key}"] = {
                 "label": f"分类参考 · {label}",
@@ -172,16 +180,20 @@ class InterpretationWorkshopMixin:
         return self._journal().sync_versions(
             {
                 key: self._prompt_template(key, default)
-                for key, (_, default) in INTERPRETATION_SECTIONS.items()
+                for key, (_, default) in WORKSHOP_SECTIONS.items()
             }
         )
 
     def _workshop_snapshot(self, actor):
         sections = self._workshop_sections()
         versions = self._journal().sync_versions(
-            {key: sections[key]["text"] for key in INTERPRETATION_SECTIONS}
+            {key: sections[key]["text"] for key in WORKSHOP_SECTIONS}
         )
-        return self._journal().conversation(actor) | {"sections": sections, "versions": versions}
+        return self._journal().conversation(actor) | {
+            "sections": sections,
+            "versions": versions,
+            "directions": self.readings.direction_labels(),
+        }
 
     def _checked_workshop(self, actor, revision):
         if actor in self._workshop_busy:
@@ -204,7 +216,6 @@ class InterpretationWorkshopMixin:
             "providers": providers,
             "preferred": preferred,
             "processing": actor in self._workshop_busy,
-            "directions": {k: v["label"] for k, v in self.readings.directions.items()},
         }
 
     async def _page_workshop_cases(self, *, query, actor):
@@ -213,17 +224,15 @@ class InterpretationWorkshopMixin:
         selected_number = int(serial[1]) if serial else None
         if serial:
             search = ""
-        intent = query.get("intent", "")
+        intent = self._case_intent_filter(query)
         outcome = query.get("feedback", "verified")
-        if intent and intent not in self.readings.directions:
-            raise ManagementError("未知卦例方向")
         if outcome not in {"all", "verified", "unverified", *OUTCOMES}:
             raise ManagementError("未知反馈筛选条件")
         rows = []
         for case in normalize_case_store(await self.get_kv_data(CASES_KEY, {})):
             if selected_number is not None and case["serial"] != selected_number:
                 continue
-            direction = str(case.get("intent") or "general")
+            direction, label = self.readings.case_direction(case)
             if intent and direction != intent:
                 continue
             feedback = feedback_with_text(case)
@@ -257,16 +266,14 @@ class InterpretationWorkshopMixin:
                 {
                     "serial": case["serial"],
                     "question": _excerpt(question, 160),
-                    "direction": self.readings.directions.get(direction, {}).get(
-                        "label", direction
-                    ),
+                    "direction": label,
                     "primary": primary,
                     "changed": changed,
                     "outcomes": outcomes,
                 }
             )
         rows.sort(key=lambda row: row["serial"], reverse=True)
-        return self._page_result(rows, page)
+        return self._page_result(rows, page) | {"directions": self.readings.direction_labels()}
 
     async def _page_workshop_history(self, *, query, actor):
         self._workshop_versions()
@@ -280,7 +287,7 @@ class InterpretationWorkshopMixin:
         if "number" in query:
             detail = self._journal().version_detail(section, query["number"])
             return detail | {"can_view_turn": detail["actor"] == actor}
-        if section not in INTERPRETATION_SECTIONS:
+        if section not in WORKSHOP_SECTIONS:
             raise ManagementError("请选择可编辑的提示词章节")
         return self._journal().versions(section, self._page_options(query)[1])
 
@@ -309,7 +316,7 @@ class InterpretationWorkshopMixin:
                 limit=MAX_CASES,
                 intent=intent if intent != "general" else "",
             )
-        return [_case_material(case) for case in selected]
+        return [_case_material(case, *self.readings.case_direction(case)) for case in selected]
 
     async def _admin_workshop_chat(self, *, payload, actor):
         state = self._checked_workshop(actor, payload.get("revision"))
@@ -321,7 +328,7 @@ class InterpretationWorkshopMixin:
         focus = require_text(payload.get("focus"), "讨论章节", 80)
         if focus not in sections:
             raise ManagementError("未知的解卦章节")
-        rules = {key: sections[key]["text"] for key in INTERPRETATION_SECTIONS}
+        rules = {key: sections[key]["text"] for key in WORKSHOP_SECTIONS}
         self._workshop_busy.add(actor)
         turn_id = None
         try:
@@ -339,7 +346,8 @@ class InterpretationWorkshopMixin:
                 if history and size > 24000:
                     break
                 history.append(entry)
-            topics = dict.fromkeys(["common", infer_intent(message), *(c["intent"] for c in cases)])
+            topics = ["common", infer_intent(message), *(c["intent"] for c in cases)]
+            topics = [self.readings.directions.get(key, {}).get("reference", key) for key in topics]
             references = {
                 key: self.readings.references.documents[key]
                 for key in topics
@@ -347,7 +355,16 @@ class InterpretationWorkshopMixin:
             }
             material = {
                 "可编辑章节": rules,
-                "固定约束": INTERPRETATION_GUARDRAIL,
+                "固定约束": {
+                    sections[key]["label"]: sections[key]["text"]
+                    for key in (
+                        "pre_review_protocol",
+                        "guardrail",
+                        "feedback_protocol",
+                        "workshop_protocol",
+                    )
+                },
+                "可选分类及适用范围": sections["classification_catalog"]["text"],
                 "分类参考": references,
                 "当前查看": {"key": focus, **sections[focus]},
                 "先前对话": history[::-1],
@@ -371,7 +388,9 @@ class InterpretationWorkshopMixin:
                         token_run,
                         "workshop",
                         chat_provider_id=provider,
-                        system_prompt=WORKSHOP_INSTRUCTIONS,
+                        system_prompt=rules["workshop_discussion_prompt"]
+                        + "\n\n"
+                        + WORKSHOP_PROTOCOL,
                         prompt=json.dumps(material, ensure_ascii=False),
                     ),
                     timeout=self._bounded_config_int(
@@ -422,7 +441,7 @@ class InterpretationWorkshopMixin:
             raise ManagementError("对话处理中或建议状态已变化，请刷新后核对", 409)
         if status == "approved":
             key = change["section"]
-            current = self._prompt_template(key, INTERPRETATION_SECTIONS[key][1])
+            current = self._prompt_template(key, WORKSHOP_SECTIONS[key][1])
             if change["base"] != _digest(current):
                 raise ManagementError("本节原文已变化，请按最新逻辑重新生成建议", 409)
             saver = getattr(self.config, "save_config", None)

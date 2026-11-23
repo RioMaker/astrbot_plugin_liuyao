@@ -129,7 +129,7 @@ mark { color: var(--amber); background: var(--cream); }
 }
 </style>
 <header class="page-head">
-      <div><h1>解卦优化</h1><p>与模型复盘原断和反馈，再逐项决定如何调整规则。</p></div>
+      <div><h1>解卦优化</h1><p>结合卦例复盘预审、问卦分类、解卦和反馈审核，逐项确认规则修改。</p></div>
       <div class="actions"><a class="mobile-link" href="#logic">查看当前逻辑</a><button id="refresh" type="button">刷新</button></div>
     </header>
     <p id="notice" role="status" aria-live="polite">正在连接 AstrBot…</p>
@@ -158,7 +158,7 @@ mark { color: var(--amber); background: var(--cream); }
                 <summary>筛选卦例</summary>
                 <div class="filters">
                   <label for="case-search">关键词<input type="search" id="case-search" maxlength="200" placeholder="搜索编号、问题、卦名、断语或反馈"></label>
-                  <label for="case-intent">问卦方向<select id="case-intent"><option value="">全部方向</option></select></label>
+                  <label for="case-intent">卦例分类<select id="case-intent"><option value="">全部分类</option></select></label>
                   <label for="case-feedback">反馈情况
                     <select id="case-feedback">
                       <option value="verified">全部已反馈</option><option>未应验</option><option>部分应验</option><option>应验</option><option>进行中</option><option>未分类</option>
@@ -195,7 +195,7 @@ mark { color: var(--amber); background: var(--cream); }
         </details>
       </section>
     </div>`;
-  startWorkshop(root, bridge);
+  return startWorkshop(root, bridge);
 }
 
 export function startWorkshop(root, bridge) {
@@ -248,11 +248,18 @@ export function startWorkshop(root, bridge) {
     const key = $("section").value;
     const rule = state?.sections[key];
     if (!rule) return;
-    let scope = rule.editable
+    const scopes = {
+      command_pre_review_prompt: "起卦和复解时用于判断是否进入解卦。",
+      command_classification_rules: "预审模型同时收到本节规则和当前候选分类。可引用人工改类的卦例复盘。",
+      feedback_review_prompt: "从下一次新建的反馈审核会话开始生效。已有审核会话沿用首次审核的规则。",
+      workshop_discussion_prompt: "用于后台优化模型的后续讨论。",
+      classification_catalog: "在卦例管理中新建分类时，可以填写适用范围供预审模型参考。",
+    };
+    let scope = scopes[key] || (rule.editable
       ? "解卦时使用此规则。对话建议经确认后生效。"
-      : "解卦请求中的只读资料，可在讨论时引用。";
+      : "只读资料，可在讨论时引用。");
     const template = state.sections.command_interpretation_prompt;
-    if (template && !template.text.includes("{chart}") && key !== "command_interpretation_prompt" && key !== "guardrail") {
+    if (template && !template.text.includes("{chart}") && (key.startsWith("interpretation_") || key.startsWith("reference_"))) {
       scope = "当前解卦提示词未包含 {chart}。将该变量加回提示词后，常规解卦才能收到本节内容。";
     }
     const version = state.versions?.[key];
@@ -324,6 +331,11 @@ export function startWorkshop(root, bridge) {
         item.chart, "原断：" + (item.reading || "未保存"), "断语：" + (item.verdict || "未保存"),
         "实际反馈：" + (item.feedback.join(" / ") || "暂无"),
       ];
+      if (item.intent_label || item.intent) {
+        const category = item.intent_label || state.directions?.[item.intent] || item.intent;
+        evidence.unshift(item.original_intent_label
+          ? "分类（人工修正）：" + item.original_intent_label + " → " + category : "分类：" + category);
+      }
       if (item.answer) evidence.push("揭晓答案：" + item.answer);
       part.append(element("strong", "#" + item.serial + " · " + (item.question || "未记录问题")),
         element("p", evidence.join("\n"), "message"));
@@ -486,7 +498,7 @@ export function startWorkshop(root, bridge) {
     if (snapshot.directions) {
       const intent = $("case-intent");
       const old = intent.value;
-      intent.replaceChildren(new Option("全部方向", ""));
+      intent.replaceChildren(new Option("全部分类", ""), new Option("未分类", "uncategorized"));
       for (const [key, label] of Object.entries(snapshot.directions)) intent.append(new Option(label, key));
       intent.value = old;
     }
@@ -528,6 +540,7 @@ export function startWorkshop(root, bridge) {
     const candidates = [old, data.preferred, available.length === 1 ? available[0].id : ""];
     provider.value = candidates.find((id) => available.some((item) => item.id === id)) || "";
     display(data);
+    await caseList.refresh();
   }
 
   async function run(operation, recover) {
@@ -592,7 +605,7 @@ export function startWorkshop(root, bridge) {
   async function decide(change, action) {
     function showDecision() {
       showSection(change.section, action === "approve" ? change.after : change.before);
-      notice(action === "approve" ? "已采用此项，下次解卦将使用新规则。" : "已放弃此项。");
+      notice(action === "approve" ? "已采用此项，规则版本已保存。" : "已放弃此项。");
     }
     await run(async () => {
       display(await bridge.apiPost("optimize/decision", { id: change.id, action }));
@@ -649,4 +662,5 @@ export function startWorkshop(root, bridge) {
   }
   $("refresh").addEventListener("click", () => run(connect));
   run(connect);
+  return () => run(refresh);
 }

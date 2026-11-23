@@ -261,7 +261,7 @@ test("lost chat and approval responses reconcile the saved result without anothe
   assert.equal(await frame.locator("#rule-text").innerText(), "前文\n原规则\n后文");
   await frame.evaluate(() => { window.dropResponse = "optimize/decision"; });
   await frame.getByRole("button", { name: "确认采用此项" }).first().click();
-  await frame.getByText("已采用此项，下次解卦将使用新规则。").waitFor();
+  await frame.getByText("已采用此项，规则版本已保存。").waitFor();
   assert.equal(await frame.locator("#rule-text").innerText(), "前文\n核实证据\n后文");
   assert.deepEqual(await frame.evaluate(() => posts.map((p) => p.endpoint)), ["optimize/chat", "optimize/decision"]);
 });
@@ -273,7 +273,7 @@ test("picker combines manual and cross-page selections and sends only those numb
   await frame.locator("#serials").fill("#45");
   const picker = frame.locator("#case-picker");
   await picker.locator("summary").click();
-  await frame.getByLabel("问卦方向").selectOption("career");
+  await frame.locator("#case-picker").getByLabel("卦例分类").selectOption("career");
   await frame.getByLabel("反馈情况").selectOption("未应验");
   await frame.locator("#case-search").fill("合同");
   await frame.locator("#case-search").press("Enter");

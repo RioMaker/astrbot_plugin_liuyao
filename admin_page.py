@@ -92,6 +92,7 @@ class AdminPageMixin:
             ("manage/users/<sender>/grant", self._admin_grant, True),
             ("manage/users/<sender>/update", self._admin_update_user, True),
             ("manage/cases", self._page_cases, False),
+            ("manage/categories", self._admin_create_direction, True),
             ("manage/cases/<case_id>", self._page_case, False),
             ("manage/cases/<case_id>/render", self._page_render_case, True),
             ("manage/cases/<case_id>/update", self._admin_change_case, True),
@@ -232,8 +233,15 @@ class AdminPageMixin:
         user["token_overview"] = overview(runs, self._ai_daily_now())
         return user
 
+    def _case_intent_filter(self, query) -> str:
+        intent = require_text(query.get("intent", ""), "卦例分类", 80, empty=True)
+        if intent and intent != "uncategorized" and intent not in self.readings.directions:
+            raise ManagementError("未知卦例分类")
+        return intent
+
     async def _page_cases(self, *, query) -> dict:
         search, page = self._page_options(query)
+        intent = self._case_intent_filter(query)
         cases = normalize_case_store(await self.get_kv_data(CASES_KEY, {}))
         state = query.get("state", "all")
         if state not in {"all", "pending", "feedback", "unavailable"}:
@@ -241,6 +249,9 @@ class AdminPageMixin:
         sender = require_text(query.get("sender", ""), "用户编号", 128, empty=True)
         rows = []
         for case in cases:
+            key, label = self.readings.case_direction(case)
+            if intent and key != intent:
+                continue
             feedback = feedback_closed(case)
             eligible = feedback_eligible(case)
             text = " ".join(
@@ -256,7 +267,7 @@ class AdminPageMixin:
                     "admin_note",
                 )
             )
-            if search and search not in text.lower():
+            if search and search not in text.lower() and search not in label.lower():
                 continue
             if sender and case.get("caster_id") != sender:
                 continue
@@ -283,6 +294,8 @@ class AdminPageMixin:
                 }
                 | {
                     "feedback_closed": feedback,
+                    "intent": key,
+                    "intent_label": label,
                     "feedback_eligible": eligible,
                     "feedback_status": feedback_status(case),
                     "primary_name": case.get("cast", {}).get("primary_name", ""),
@@ -296,6 +309,7 @@ class AdminPageMixin:
             row["usage_id"] = keys[row["id"]]
             row["token_usage"] = summarize([r for r in runs if r["cast_key"] == row["usage_id"]])
         result["all_count"] = len(cases)
+        result["directions"] = self.readings.direction_labels()
         return result
 
     async def _page_case(self, case_id: str, *, query) -> dict:
@@ -304,9 +318,16 @@ class AdminPageMixin:
         if case is None:
             raise ManagementError("卦例不存在或已删除", 404)
         key = case_usage_key(case)
+        intent, label = self.readings.case_direction(case)
         runs = [r for r in await self._token_runs() if r["cast_key"] == key]
         return {
-            "case": {**case, "analysis_history": analysis_history(case)},
+            "case": {
+                **case,
+                "intent": intent,
+                "intent_label": label,
+                "analysis_history": analysis_history(case),
+            },
+            "directions": self.readings.direction_labels(),
             "revision": case_revision(case),
             "token_usage": summarize(runs),
             "usage_id": key,

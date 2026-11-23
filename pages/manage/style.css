@@ -39,6 +39,8 @@
   --amber: #e0c07a;
   --cream: #393322;
 }
+#category-filter { min-width:0; max-width:100%; }
+#case-category { max-width:min(18rem, 100%); }
 @media (max-width: 700px) {
   nav[aria-label="管理分类"] { flex-wrap: wrap; gap: 0 14px; padding: 0 12px; }
 }

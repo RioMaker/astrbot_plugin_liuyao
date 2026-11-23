@@ -24,6 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
         ("周末北京会下雪吗", "weather"),
         ("明天出差会遇上雷雨吗", "weather"),
         ("射覆：猜一件挡雨的物品", "shefu"),
+        ("猜我盒子里是什么", "shefu"),
+        ("昨天掉的钥匙在哪里？", "lost_item"),
+        ("我弄丢了耳机，能找回吗", "lost_item"),
+        ("朋友送的手链不见了，还能找到吗？", "lost_item"),
+        ("我的手机在哪里维修比较好", "general"),
+        ("找不到工作怎么办", "career"),
         ("这段感情能风雨同舟吗", "relationship"),
         ("事业雪上加霜怎么办", "career"),
         ("风水如何", "general"),
@@ -47,16 +53,18 @@ def test_all_directions_have_bounded_source_based_documents():
     plugin = _make_enabled_plugin()
     library = plugin.readings.references
     assert library.errors == {}
-    assert set(library.documents) == {"common", *plugin.readings.directions}
+    topics = {p.get("reference", k) for k, p in plugin.readings.directions.items()}
+    assert set(library.documents) == {"common", *topics}
     for key, profile in plugin.readings.directions.items():
         text = plugin.readings.reference_context(key)
-        assert f"# 六爻分类参考：{profile['label']}" in text
+        source = profile.get("reference", key)
+        assert f"# 六爻分类参考：{plugin.readings.directions[source]['label']}" in text
         assert "# 六爻分类参考：通则" in text
-        assert "https://" in library.documents[key]
+        assert "https://" in library.documents[source]
         assert "2026-09-24" in text
         assert len(text) < 10_000
         for other, other_profile in plugin.readings.directions.items():
-            if other != key:
+            if other != source:
                 assert f"# 六爻分类参考：{other_profile['label']}" not in text
 
 

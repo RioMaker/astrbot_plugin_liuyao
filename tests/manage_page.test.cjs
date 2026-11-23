@@ -22,11 +22,13 @@ function installBridge() {
   const state = window.qa = { balance: 0, posts: [], grants: [], failAfterSave: false, block: false, downloads: [], downloadError: "", blockDownload: false };
   state.previews = [];
   state.testRuns = [];
+  state.directions = { career: "事业", shefu: "射覆", lost_item: "寻物" };
   state.previewError = "";
   state.previewImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDAAAAABJRU5ErkJggg==";
   const cases = [302, 905].map((serial) => ({
     id: `LY-${serial}`, serial, caster_id: "20002", caster_name: "测试群友", group_id: "10001",
     created_at: "2026-10-25T09:40:53+08:00", question: "项目能按期完成吗？", feedback: [],
+    intent: serial === 302 ? "shefu" : "career", intent_label: serial === 302 ? "射覆" : "事业",
     cast: { lines: [7, 8, 9, 6, 7, 8], moving_lines: [3, 4], primary_name: "未济", changed_name: "蒙" },
   }));
   state.cases = cases;
@@ -42,8 +44,8 @@ function installBridge() {
     ready: async () => ({}),
     apiGet: async (endpoint, query = {}) => {
       if (endpoint === "optimize/cases") {
-        const selected = cases.filter((c) => !query.search || query.search === "#" + c.serial);
-        return { page: 1, pages: 1, items: selected.map((c) => ({ ...c, primary: c.cast.primary_name })) };
+        const selected = cases.filter((c) => (!query.search || query.search === "#" + c.serial) && (!query.intent || query.intent === c.intent));
+        return { page: 1, pages: 1, directions: state.directions, items: selected.map((c) => ({ ...c, primary: c.cast.primary_name, direction: c.intent_label })) };
       }
       if (endpoint === "manage/reading-tests") return { page: 1, pages: 1, items: [...state.testRuns].reverse() };
       if (endpoint.startsWith("manage/reading-tests/")) return state.testRuns.find((r) => r.id === Number(endpoint.split("/").pop()));
@@ -51,12 +53,25 @@ function installBridge() {
       if (endpoint === "manage/users") return {
         items: [user()], page: 1, pages: 1, total: 1, stats: { users: 1, casts: 1, banned: 0 },
       };
-      if (endpoint === "manage/cases") return { items: cases, all_count: cases.length, total: cases.length, page: 1, pages: 1 };
+      if (endpoint === "manage/cases") {
+        const items = cases.filter((c) => !query.intent || query.intent === c.intent);
+        return { items, all_count: cases.length, total: items.length, page: 1, pages: 1, directions: state.directions };
+      }
       const record = cases.find((item) => endpoint === `manage/cases/${item.id}`);
-      if (record) return { case: record, revision: "test" };
+      if (record) return { case: record, revision: "test", directions: state.directions };
       throw new Error(`Unexpected endpoint: ${endpoint}`);
     },
     apiPost: async (endpoint, payload) => {
+      if (endpoint === "manage/categories") {
+        state.directions.custom_test = payload.label;
+        return { intent: "custom_test", label: payload.label };
+      }
+      if (endpoint === "manage/cases/LY-302/update" && payload.action === "classify" && payload.revision === "test") {
+        cases[0].intent_correction = { original_label: cases[0].intent_label, at: cases[0].created_at };
+        cases[0].intent = payload.intent;
+        cases[0].intent_label = state.directions[payload.intent];
+        return { saved: true };
+      }
       if (endpoint === "manage/reading-tests/start") {
         state.posts.push({endpoint, ...payload});
         const id = state.testRuns.length + 1;
@@ -140,6 +155,36 @@ async function waitNotice(frame, text, errors) {
     assert.fail(`${text}: ${errors.join("; ") || error.message}`);
   }
 }
+
+test("case management creates a category, corrects a case, and filters both case pickers", async (t) => {
+  const { frame, errors } = await openPage(t);
+  await frame.locator("#close-detail").click();
+  await frame.getByRole("button", { name: "卦例管理", exact: true }).click();
+  await frame.getByRole("button", { name: "新建分类", exact: true }).click();
+  await frame.getByLabel("分类名称").fill("宠物走失");
+  await frame.getByLabel("适用范围", {exact: false}).fill("寻找走失的宠物");
+  await frame.getByRole("button", { name: "创建分类" }).click();
+  await frame.getByText("分类已创建，可在卦例详情中选用。", { exact: true }).waitFor();
+  const filter = frame.getByLabel("按卦例分类筛选");
+  await filter.selectOption("shefu");
+  const row = frame.locator("#table-body tr");
+  await row.getByRole("cell", {name: "射覆", exact: true}).waitFor();
+  await row.getByRole("button", {name: "查看卦例"}).click();
+  await frame.getByLabel("所在分类").selectOption("custom_test");
+  await frame.getByRole("button", {name: "保存分类"}).click();
+  await frame.getByText(/人工修正前的分类：射覆/).waitFor();
+  await frame.locator("#close-detail").click();
+  await frame.locator("#empty").waitFor();
+  await filter.selectOption("custom_test");
+  await row.getByRole("cell", {name: "宠物走失", exact: true}).waitFor();
+  assert.equal(await row.count(), 1);
+  await frame.getByRole("button", {name: "解卦测试", exact: true}).click();
+  await frame.getByLabel("按分类查找").selectOption("custom_test");
+  await frame.getByLabel("选择卦例").selectOption("302");
+  assert.match(await frame.locator("#test-case option:checked").innerText(), /宠物走失/);
+  assert.equal(await frame.locator("#test-case option").count(), 2);
+  assert.deepEqual(errors, []);
+});
 
 test("reading test tab runs all three sources and expands the original inputs and outputs", async (t) => {
   const { page, frame, errors } = await openPage(t);

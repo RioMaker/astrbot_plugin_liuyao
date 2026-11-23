@@ -50,6 +50,9 @@ INTENT_ALIASES = {
     "猜物": "shefu",
     "猜物品": "shefu",
     "shefu": "shefu",
+    "寻物": "lost_item",
+    "失物": "lost_item",
+    "lost_item": "lost_item",
     "综合": "general",
     "总体": "general",
     "general": "general",
@@ -181,13 +184,16 @@ def split_manual_payload(payload: str) -> tuple[str, str]:
     raise ManualCastError("无法从指令中识别六爻；推荐格式：7 8 9 6 7 8")
 
 
-def parse_intent_and_question(text: str) -> tuple[str, str]:
+def parse_intent_and_question(
+    text: str,
+    match_intent: Callable[[str], str | None] = INTENT_ALIASES.get,
+) -> tuple[str, str]:
     """Return a normalized intent key and the optional question text."""
 
     parts = (text or "").strip().split(maxsplit=1)
     if not parts:
         return "general", ""
-    intent = INTENT_ALIASES.get(parts[0].lower())
+    intent = match_intent(parts[0].lower())
     if intent:
         return intent, parts[1].strip() if len(parts) == 2 else ""
     return infer_intent(text), (text or "").strip()
@@ -196,8 +202,23 @@ def parse_intent_and_question(text: str) -> tuple[str, str]:
 def infer_intent(question: str) -> str:
     """Conservative local routing; never subscribe to additional messages."""
     text = (question or "").lower()
+    if any(word in text for word in ("猜物", "猜猜是什么", "盒子里是什么", "盒中何物")):
+        return "shefu"
+    if re.search(
+        r"寻物|失物|(?:遗失|丢失|弄丢|遗落)的.{1,16}(?:在哪|哪里|何处|找回|找到)|"
+        r"(?:不见了|弄丢了|遗落了|落下了).{0,20}(?:去哪找|去哪里找|找回|还能找到|落在哪|在哪里)",
+        text,
+    ):
+        return "lost_item"
+    item = r"(?:钥匙|手机|钱包|耳机|证件|身份证|戒指|手表|书包|眼镜|东西|充电器|公交卡|银行卡)"
+    missing = (
+        r"(?:找不到|找不着|丢了|弄丢|丢失|遗失|遗落|落在|掉在|不见了|放哪|放在哪|放到哪|"
+        r"去哪了|找回|在哪(?:里|儿)?[呢了吗呀啊]?(?:[？?，,。！!]|$))"
+    )
+    if re.search(rf"{item}.{{0,8}}{missing}|{missing}.{{0,8}}{item}", text):
+        return "lost_item"
     groups = (
-        ("shefu", ("射覆", "猜物", "猜猜是什么", "盒子里是什么", "盒中何物")),
+        ("shefu", ("射覆",)),
         # Do not match lone 雨/风/雪: 风雨同舟、风水、雪上加霜 are not weather.
         (
             "weather",

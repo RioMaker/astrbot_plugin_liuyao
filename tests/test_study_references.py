@@ -18,15 +18,16 @@ NOTES = ROOT / "docs" / "study"
 def test_catalog_covers_all_topics_with_three_distinct_sourced_cases():
     plugin = _make_enabled_plugin()
     library = plugin.readings.study_references
+    topics = {p.get("reference", k) for k, p in plugin.readings.directions.items()}
     assert not library.errors
     assert set(library.documents) == {
         "index",
         "foundations",
         "sources",
-        *plugin.readings.directions,
+        *topics,
     }
     all_ids = []
-    for key in plugin.readings.directions:
+    for key in topics:
         document = library.documents[key]
         assert "2026-09-24" in document
         assert "## 学习笔记" in document

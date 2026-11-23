@@ -55,6 +55,30 @@ async def finished(plugin, test_id):
     return await plugin._page_reading_test(str(test_id), query={})
 
 
+def test_dashboard_reports_model_choice_and_uses_the_manually_assigned_category(dashboard):
+    plugin, event = dashboard
+
+    async def run():
+        await plugin._manual_command_reply(event, "789678 原来的东西在什么地方？", analyze=False)
+        record = plugin._test_store[CASES_KEY]["cases"][0]
+        detail = await plugin._page_case(record["id"], query={})
+        await plugin._admin_change_case(
+            record["id"],
+            {"action": "classify", "intent": "lost_item", "revision": detail["revision"]},
+            "operator",
+        )
+        plugin.context.llm_generate.side_effect = [response(REVIEW), response()]
+        test_id = await start(plugin, source="case", serial=str(record["serial"]), question="")
+        result = await finished(plugin, test_id)
+        assert result["status"] == "success"
+        steps = {s["title"]: s for s in result["report"]["steps"]}
+        classified = steps["预审解析与分类"]["outputs"]
+        assert classified["解析结果"]["intent"] == "事业" and classified["分类来源"] == "人工分类"
+        assert classified["最终分类"] == steps["解卦依据"]["inputs"]["分类"] == "lost_item"
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("source", ["manual", "case"])
 def test_same_requests_as_normal_command_isolated_history_and_tokens(
     dashboard, source, monkeypatch

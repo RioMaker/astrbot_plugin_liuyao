@@ -128,6 +128,7 @@ class ReadingTestMixin:
                 raise ManagementError("所选卦例的排盘数据不完整", 422) from exc
             inputs.update(
                 卦例编号=serial,
+                卦例分类=self.readings.case_direction(record)[1],
                 保存的六爻=cast.lines,
                 原起卦时间=str(cast.cast_at or ""),
                 保存的排盘=cast.chart,
@@ -167,6 +168,9 @@ class ReadingTestMixin:
                     intent,
                     no_question,
                     str(record.get("method") or "历史排盘") if record else "",
+                    self.readings.normalize_intent(record["intent"], "")
+                    if record and record.get("intent_correction")
+                    else "",
                 )
             )
             self._reading_test_tasks.add(task)
@@ -187,7 +191,9 @@ class ReadingTestMixin:
         except ManagementError:
             logger.exception("liuyao：无法更新测试 #%s 状态", test_id)
 
-    async def _run_reading_test(self, trace, source, cast, question, intent, no_question, method):
+    async def _run_reading_test(
+        self, trace, source, cast, question, intent, no_question, method, assigned_intent
+    ):
         status = "interrupted"
         try:
             inputs = trace.report["request"]
@@ -251,6 +257,7 @@ class ReadingTestMixin:
                 intent=intent,
                 method=method,
                 no_question=no_question,
+                assigned_intent=assigned_intent,
                 reuse=source == "case",
                 manual=source == "manual",
                 trace=trace,

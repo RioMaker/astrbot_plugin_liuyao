@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from test_agent_analysis import ANALYSIS, QUESTION, prepare
+from test_feedback_review import case, decision
 from test_permissions import ROOT
 
 from divination import CastResult
+from feedback_review import REVIEW_GUARDRAIL
 from main import PLUGIN_VERSION, LiuyaoPlugin
-from prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_PROMPT
+from prompts import INTERPRETATION_GUARDRAIL, INTERPRETATION_PROMPT, PRE_REVIEW_PROTOCOL
 from scripts.build_workshop_tab import TARGET, render_bundle
 from user_management import CASES_KEY, ManagementError
 
@@ -211,7 +213,7 @@ def test_case_sources_followup_and_conversation_only(setup_workshop):
     [
         edit("guardrail"),
         edit("reference_career"),
-        edit("command_pre_review_prompt"),
+        edit("pre_review_protocol"),
         edit(before="不存在的原文"),
         edit(PROMPT, "{chart}", "没有排盘"),
         edit(after="{unknown}"),
@@ -360,6 +362,104 @@ def test_provider_failure_and_storage_failure_release_conversation(setup_worksho
         assert error.value.status == 503 and plugin.config == previous
         assert (await state(plugin))["turns"] == []
         plugin.context.llm_generate.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_approved_rules_reach_pre_review_classifier_feedback_and_discussion(setup_workshop):
+    plugin, event = setup_workshop
+
+    async def run():
+        changes = [
+            edit(
+                "command_pre_review_prompt",
+                "判断是否存在有效问题",
+                "核对实际所问后判断是否存在有效问题",
+            ),
+            edit(
+                "command_classification_rules",
+                "按用户要解决的问题",
+                "优先按寻物目的与未知物身份区分，再按用户要解决的问题",
+            ),
+            edit(
+                "feedback_review_prompt",
+                "判断反馈是否提供",
+                "先检查实物是否找回，再判断反馈是否提供",
+            ),
+            edit("workshop_discussion_prompt", "先回答本轮问题", "先对照人工纠错再回答本轮问题"),
+        ]
+        draft = await chat(plugin, response(changes=changes))
+        for change in draft["turns"][0]["changes"]:
+            assert draft["versions"][change["section"]] == 1
+            assert change["after"] not in plugin.config[change["section"]]
+            applied = await decide(plugin, change, "approve")
+            assert applied["versions"][change["section"]] == 2
+
+        question = "昨天把耳机弄丢了，能找回来吗？"
+        plugin.context.llm_generate = AsyncMock(
+            side_effect=[
+                SimpleNamespace(
+                    completion_text='{"reject":false,"valid_question":true,"intent":"射覆"}'
+                ),
+                SimpleNamespace(completion_text=ANALYSIS),
+            ]
+        )
+        await plugin._dispatch_liuyao(event, question)
+        pre, reading = [
+            call.kwargs["prompt"] for call in plugin.context.llm_generate.await_args_list
+        ]
+        assert changes[0]["after"] in pre and changes[1]["after"] in pre
+        assert pre.endswith(PRE_REVIEW_PROTOCOL) and question in pre
+        assert "寻物研判" in reading and "射覆专用解读要求" not in reading
+        assert "规则校正" in plugin._render_and_send_chart.await_args.kwargs["intent_label_suffix"]
+        assert plugin._test_store[CASES_KEY]["cases"][0]["intent"] == "lost_item"
+
+        record = case()
+        plugin._test_store[CASES_KEY]["cases"].append(record)
+        plugin.context.llm_generate = AsyncMock(
+            return_value=SimpleNamespace(completion_text=json.dumps(decision(), ensure_ascii=False))
+        )
+        await plugin._review_case_feedback(event, record, "已经找回了")
+        system = plugin.context.llm_generate.await_args.kwargs["system_prompt"]
+        assert changes[2]["after"] in system and system.endswith(REVIEW_GUARDRAIL)
+        request = json.loads(plugin.context.llm_generate.await_args.kwargs["prompt"])
+        assert request["intent_label"] == "事业"
+        await chat(plugin, response())
+        assert changes[3]["after"] in plugin.context.llm_generate.await_args.kwargs["system_prompt"]
+
+    asyncio.run(run())
+
+
+def test_corrected_case_and_custom_category_reach_all_workshop_views(setup_workshop):
+    plugin, _ = setup_workshop
+
+    async def run():
+        record = case(intent="shefu", question="走失的猫能找回来吗？")
+        plugin._test_store[CASES_KEY] = [record]
+        category = await plugin._admin_create_direction(
+            payload={"label": "宠物走失", "description": "寻找走失的宠物"}, actor="alice"
+        )
+        detail = await plugin._page_case(record["id"], query={})
+        await plugin._admin_change_case(
+            record["id"],
+            {"revision": detail["revision"], "action": "classify", "intent": category["intent"]},
+            "alice",
+        )
+        result = await plugin._page_workshop_cases(
+            query={"intent": category["intent"], "feedback": "all"}, actor="alice"
+        )
+        assert [row["direction"] for row in result["items"]] == ["宠物走失"]
+        result = await chat(
+            plugin, response(), use_cases=True, serials=[1], focus="command_classification_rules"
+        )
+        snapshot = result["turns"][-1]["cases"][0]
+        assert (
+            snapshot["original_intent_label"] == "射覆" and snapshot["intent_label"] == "宠物走失"
+        )
+        material = json.loads(plugin.context.llm_generate.await_args.kwargs["prompt"])
+        assert material["本轮卦例"][0] == snapshot
+        assert "寻找走失的宠物" in material["可选分类及适用范围"]
+        assert "alice" not in str(snapshot)
 
     asyncio.run(run())
 
@@ -584,6 +684,7 @@ def test_plugin_load_captures_config_changes_before_any_workshop_visits(setup_wo
         first = plugin.config[GENERAL]
         for text in ("第一次在配置页修改。", "第二次在配置页修改。"):
             reloaded = LiuyaoPlugin(plugin.context, Config(plugin.config | {GENERAL: text}))
+            reloaded.get_kv_data = plugin.get_kv_data
             reloaded._ensure_user_registry = AsyncMock()
             await reloaded.initialize()
         versions = await reloaded._page_workshop_versions(actor="alice", query={"section": GENERAL})

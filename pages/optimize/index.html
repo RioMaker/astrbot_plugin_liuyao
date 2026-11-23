@@ -9,7 +9,7 @@
 <body>
   <main>
     <header class="page-head">
-      <div><h1>解卦优化</h1><p>与模型复盘原断和反馈，再逐项决定如何调整规则。</p></div>
+      <div><h1>解卦优化</h1><p>结合卦例复盘预审、问卦分类、解卦和反馈审核，逐项确认规则修改。</p></div>
       <div class="actions"><a class="mobile-link" href="#logic">查看当前逻辑</a><button id="refresh" type="button">刷新</button></div>
     </header>
     <p id="notice" role="status" aria-live="polite">正在连接 AstrBot…</p>
@@ -38,7 +38,7 @@
                 <summary>筛选卦例</summary>
                 <div class="filters">
                   <label for="case-search">关键词<input type="search" id="case-search" maxlength="200" placeholder="搜索编号、问题、卦名、断语或反馈"></label>
-                  <label for="case-intent">问卦方向<select id="case-intent"><option value="">全部方向</option></select></label>
+                  <label for="case-intent">卦例分类<select id="case-intent"><option value="">全部分类</option></select></label>
                   <label for="case-feedback">反馈情况
                     <select id="case-feedback">
                       <option value="verified">全部已反馈</option><option>未应验</option><option>部分应验</option><option>应验</option><option>进行中</option><option>未分类</option>

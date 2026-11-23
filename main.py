@@ -86,7 +86,7 @@ else:  # pragma: no cover - direct local execution
 PLUGIN_NAME = "astrbot_plugin_liuyao"
 PLUGIN_AUTHOR = "Rio"
 PLUGIN_DESC = "面向 QQ 群的 AI 预审与六爻起卦"
-PLUGIN_VERSION = "0.41.1"
+PLUGIN_VERSION = "0.42.0"
 PLUGIN_REPO = "https://github.com/RioMaker/astrbot_plugin_liuyao"
 
 METHOD_SWITCHES_KEY = "method_switches"
@@ -199,6 +199,7 @@ class LiuyaoPlugin(
         logger.info("liuyao：已加载 64 卦与 384 条基础爻辞")
 
     async def initialize(self):
+        await self._load_custom_directions()
         await self._ensure_user_registry()
         try:
             self._workshop_versions()
@@ -482,6 +483,14 @@ class LiuyaoPlugin(
         error = await self._agent_tool_gate(event)
         if error:
             return error
+        if isinstance(topic, str):
+            key = self.readings.normalize_intent(topic, "")
+            profile = self.readings.directions.get(key, {})
+            if reference := profile.get("reference"):
+                return (
+                    f"{profile['label']}采用综合研读笔记。\n"
+                    + self.readings.study_references.lookup(reference)
+                )
         return self.readings.study_references.lookup(topic)
 
     @filter.llm_tool(name="lookup_zhouyi_text")
@@ -807,16 +816,7 @@ class LiuyaoPlugin(
         return intent, comment or fallback_comment
 
     def _normalize_intent_choice(self, value: str, fallback: str) -> str:
-        normalized = (value or "").strip().lower()
-        for key, profile in self.readings.directions.items():
-            candidates = {
-                key.lower(),
-                str(profile.get("label", "")).strip().lower(),
-                *{str(alias).strip().lower() for alias in profile.get("aliases", [])},
-            }
-            if normalized in candidates:
-                return key
-        return fallback
+        return self.readings.normalize_intent(value, fallback)
 
     def _infer_intent_from_question(self, question: str) -> str:
         return infer_intent(question)
@@ -1119,6 +1119,8 @@ class LiuyaoPlugin(
         case_id = ""
         attempt_started = False
         attempt_finished = False
+        assigned_intent = ""
+        reviewed_intent = ""
         analysis = ""
         analysis_recordable = False
         refusal = ""
@@ -1223,6 +1225,8 @@ class LiuyaoPlugin(
                 saved_case = next(
                     row for row in await self._load_case_records() if row["id"] == case_id
                 )
+                if saved_case.get("intent_correction"):
+                    assigned_intent = self.readings.normalize_intent(saved_case["intent"], "")
                 await self._bind_token_case(token_run, saved_case)
                 if original is None:
                     async with self._cast_lock:
@@ -1261,6 +1265,7 @@ class LiuyaoPlugin(
                 intent=intent,
                 method=method,
                 no_question=no_question,
+                assigned_intent=assigned_intent,
                 reuse=original is not None,
                 manual=supplied_cast is not None,
                 chart_only=chart_only,
@@ -1268,6 +1273,7 @@ class LiuyaoPlugin(
                 trace=trace,
             )
             intent, method = reading.intent, reading.method
+            reviewed_intent = intent if reading.reviewed else ""
             analysis, refusal = reading.analysis, reading.notice
             analysis_recordable = reading.status == "success"
 
@@ -1294,7 +1300,7 @@ class LiuyaoPlugin(
                         question=question,
                         analysis=analysis if analysis_recordable else "",
                         reason=refusal or (analysis if not analysis_recordable else ""),
-                        intent=intent,
+                        intent=reviewed_intent,
                     )
                     attempt_finished = True
                 except Exception:
@@ -1314,7 +1320,9 @@ class LiuyaoPlugin(
                 event,
                 cast,
                 intent=intent,
-                intent_label_suffix="（AI分类）" if reading.reviewed else "",
+                intent_label_suffix=(
+                    f"（{reading.classification_source}）" if reading.classification_source else ""
+                ),
                 question=question,
                 method=method,
                 cast_at=cast.cast_at,
@@ -1375,7 +1383,7 @@ class LiuyaoPlugin(
                         question=question,
                         analysis=analysis if analysis_recordable else "",
                         reason="" if analysis_recordable else "请求中断，未完成有效解卦。",
-                        intent=intent,
+                        intent=reviewed_intent,
                     )
                 except Exception:
                     logger.exception("liuyao：请求结束时保存解卦历史失败")

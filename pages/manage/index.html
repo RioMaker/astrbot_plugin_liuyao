@@ -38,7 +38,9 @@
         <form id="search-form" class="toolbar">
           <label class="search"><span class="sr-only">搜索用户或卦例</span><input id="search" type="search" maxlength="200" placeholder="搜索 QQ 号、昵称或群号"></label>
           <label><span class="sr-only">筛选状态</span><select id="state"><option value="all">全部用户</option><option value="active">正常使用</option><option value="banned">已封禁</option></select></label>
+          <label id="category-filter" hidden><span class="sr-only">按卦例分类筛选</span><select id="case-category"><option value="">全部分类</option></select></label>
           <button type="submit">搜索</button>
+          <button type="button" class="secondary" id="new-category" hidden>新建分类</button>
           <div id="usage-filters" class="usage-filters" hidden>
             <label>查看维度<select id="usage-view"><option value="cases">单卦消耗</option><option value="daily">每日消耗</option><option value="weekly">每周消耗</option><option value="monthly">每月消耗</option><option value="groups">各群消耗</option><option value="users">每人消耗</option></select></label>
             <label>开始日期<input id="usage-start" type="date"></label>
@@ -67,6 +69,7 @@
             </select></label>
             <div id="test-case-fields">
               <label class="field">查找卦例<input id="test-search" type="search" maxlength="200" placeholder="输入 #编号、问题或卦名"></label>
+              <label class="field">按分类查找<select id="test-category"><option value="">全部分类</option></select></label>
               <label class="field">选择卦例<select id="test-case" required></select></label>
               <div class="pager"><button id="test-case-prev" type="button" class="secondary">上一页</button><span id="test-case-page"></span><button id="test-case-next" type="button" class="secondary">下一页</button></div>
             </div>

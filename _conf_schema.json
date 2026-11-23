@@ -231,7 +231,13 @@
     "type": "text",
     "description": "默认起卦内容预审提示词",
     "default": "",
-    "hint": "留空时插件会自动填入内置提示词并在下次重载后显示在此，清空保存即恢复内置默认。可用变量 {question}。插件会追加有效问题校验、JSON 输出格式与安全边界要求；没有具体所问时只排盘、不解卦、不计次。"
+    "hint": "可在「解卦优化」中复盘预审。可用变量 {question}。插件另行附上分类规则、当前候选分类和预审输出协议。清空保存可恢复内置默认。"
+  },
+  "command_classification_rules": {
+    "type": "text",
+    "description": "问卦分类规则",
+    "default": "",
+    "hint": "用于起卦、复解和后台测试的预审分类。可在「解卦优化」中结合人工改类的卦例调整。候选分类及适用范围来自「卦例管理」。清空保存可恢复内置默认。"
   },
   "command_interpretation_prompt": {
     "type": "text",
@@ -244,7 +250,7 @@
     "type": "text",
     "description": "通用研判规则",
     "default": "",
-    "hint": "用于天气、射覆以外的解读。{intent_label} 会替换为实际方向。清空保存即恢复内置默认。"
+    "hint": "用于综合、事业等常规分类及自建分类。{intent_label} 会替换为实际方向。清空保存可恢复内置默认。"
   },
   "interpretation_weather_rules": {
     "type": "text",
@@ -263,6 +269,18 @@
     "description": "卦例反馈审核提示词",
     "default": "",
     "hint": "留空恢复内置默认提示词。可用变量 {question}、{hexagram}、{verdict}、{feedback}；为复用审核前缀，{feedback} 指向本轮用户消息，实际内容经独立消息传入。插件追加严格 JSON 协议；同一卦例保留最初提示词和最近 8 轮审核上下文。"
+  },
+  "interpretation_lost_item_rules": {
+    "type": "text",
+    "description": "寻物研判规则",
+    "default": "",
+    "hint": "用于寻找已知遗失物的解读，可在「解卦优化」中调整。清空保存可恢复内置默认。"
+  },
+  "workshop_discussion_prompt": {
+    "type": "text",
+    "description": "优化对话规则",
+    "default": "",
+    "hint": "用于后台模型复盘和提出建议。每项建议由管理员确认后生效。清空保存可恢复内置默认。"
   },
   "agent_chart_comment_prompt": {
     "type": "text",

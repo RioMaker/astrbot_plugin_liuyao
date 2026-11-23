@@ -37,26 +37,52 @@ class ReadingService:
         directions = payload.get("directions")
         if not isinstance(directions, dict) or "general" not in directions:
             raise ValueError("意图方向数据缺少 directions/general")
-        self.directions: dict[str, dict[str, Any]] = directions
-        self.references = ReferenceLibrary(intent_path.parent / "references", directions)
+        self.builtin_directions = directions
+        self.directions: dict[str, dict[str, Any]] = directions.copy()
+        sources = {
+            key: profile for key, profile in directions.items() if "reference" not in profile
+        }
+        self.references = ReferenceLibrary(intent_path.parent / "references", sources)
         self.study_references = StudyReferenceLibrary(
             intent_path.parent.parent / "docs" / "study",
-            directions,
+            sources,
         )
         self.curated: dict[tuple[int, str], dict[str, Any]] = {}
         for item in payload.get("curated_readings", []):
             if isinstance(item, dict):
                 self.curated[(int(item["hexagram"]), str(item["intent"]))] = item
 
-    def normalize_intent(self, intent: str) -> str:
-        value = (intent or "general").strip().lower()
+    def set_custom_directions(self, custom: dict) -> None:
+        self.directions = {**self.builtin_directions, **custom}
+
+    def direction_labels(self) -> dict[str, str]:
+        return {key: profile["label"] for key, profile in self.directions.items()}
+
+    def classification_catalog(self) -> str:
+        rows = []
+        for profile in self.directions.values():
+            scope = profile.get("description") or "、".join(profile.get("focus", []))
+            rows.append(f"{profile['label']}：{scope}" if scope else profile["label"])
+        return "\n".join(rows)
+
+    def normalize_intent(self, intent: str, fallback: str = "general") -> str:
+        value = (intent or "").strip().lower()
+        if not value:
+            return fallback
         if value in self.directions:
             return value
         for key, profile in self.directions.items():
             aliases = [str(alias).lower() for alias in profile.get("aliases", [])]
             if value == str(profile.get("label", "")).lower() or value in aliases:
                 return key
-        return "general"
+        return fallback
+
+    def case_direction(self, case: dict) -> tuple[str, str]:
+        for field in ("intent", "intent_label"):
+            key = self.normalize_intent(str(case.get(field) or ""), "")
+            if key:
+                return key, self.directions[key]["label"]
+        return "uncategorized", str(case.get("intent_label") or case.get("intent") or "未分类")
 
     def render(
         self,
@@ -121,6 +147,8 @@ class ReadingService:
 
         rows.append(chart_text(chart_for(cast), show_changed=bool(moving)))
         focus = "、".join(str(item) for item in profile.get("focus", []))
+        if profile.get("description"):
+            rows.append(f"{profile['label']}适用范围：{profile['description']}")
         if focus:
             rows.append(f"{profile['label']}关注：{focus}")
 
@@ -131,8 +159,9 @@ class ReadingService:
 
         if for_agent:
             rows.append(self.reference_context(intent_key))
-            kind = intent_key if intent_key in {"weather", "shefu"} else "general"
-            key = f"interpretation_{kind}_rules"
+            key = f"interpretation_{intent_key}_rules"
+            if key not in INTERPRETATION_SECTIONS:
+                key = "interpretation_general_rules"
             _, rule = INTERPRETATION_SECTIONS[key]
             if self.prompt_template:
                 rule = self.prompt_template(key, rule)
@@ -141,7 +170,8 @@ class ReadingService:
         return "\n".join(rows)
 
     def reference_context(self, intent: str) -> str:
-        return self.references.render(self.normalize_intent(intent)) + (
+        key = self.normalize_intent(intent)
+        return self.references.render(self.directions[key].get("reference", key)) + (
             "\n\n扩展研读：可调用 lookup_liuyao_reference(topic) 获取任意类型的"
             "完整学习笔记、三个古籍卦例与出处，不限当前方向；topic 留空返回目录，"
             "传“基础”读通则，传“来源”核对版本。古例不等于本群已验证反馈。"

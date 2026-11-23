@@ -66,6 +66,7 @@ def test_intent_dataset_has_supported_directions_and_curated_examples() -> None:
         "family",
         "travel",
         "shefu",
+        "lost_item",
         "weather",
     }
     assert len(payload["curated_readings"]) >= 8

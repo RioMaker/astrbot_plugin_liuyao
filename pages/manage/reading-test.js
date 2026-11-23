@@ -61,7 +61,7 @@ function renderReport(row, time) {
   }
 }
 
-export function mountReadingTests(bridge, time, makeRequestId) {
+export function mountReadingTests(bridge, time, makeRequestId, updateCategoryFilter) {
   let active = false, submitting = false, selected = null, submittedId = null, showingRunning = false;
   let casePage = 1, historyPage = 1, caseSeq = 0, historySeq = 0, detailSeq = 0;
   let retry = null, pollTimer, searchTimer, rendered = "";
@@ -80,14 +80,15 @@ export function mountReadingTests(bridge, time, makeRequestId) {
     select.disabled = true;
     buttons();
     try {
-      const data = await bridge.apiGet("optimize/cases", { search: $("test-search").value.trim(), feedback: "all", page });
+      const data = await bridge.apiGet("optimize/cases", { search: $("test-search").value.trim(), intent: $("test-category").value, feedback: "all", page });
       if (seq !== caseSeq) return;
+      updateCategoryFilter($("test-category"), data.directions);
       select.replaceChildren();
       const prompt = el("option", data.items.length ? "请选择卦例" : "没有匹配的卦例");
       prompt.value = "";
       select.append(prompt);
       for (const c of data.items) {
-        const option = el("option", `#${c.serial} · ${c.primary || "卦名未记录"} · ${c.question || "未记录问题"}`);
+        const option = el("option", `#${c.serial} · ${c.direction || "未分类"} · ${c.primary || "卦名未记录"} · ${c.question || "未记录问题"}`);
         option.value = c.serial;
         select.append(option);
       }
@@ -187,6 +188,7 @@ export function mountReadingTests(bridge, time, makeRequestId) {
   });
   $("test-source").addEventListener("change", sourceChanged);
   $("test-case").addEventListener("change", buttons);
+  $("test-category").addEventListener("change", () => { clearTimeout(searchTimer); loadCases(); });
   $("test-search").addEventListener("input", () => {
     caseSeq++; clearTimeout(searchTimer);
     $("test-case").replaceChildren(); buttons();

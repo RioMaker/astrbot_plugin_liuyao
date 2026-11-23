@@ -5,6 +5,7 @@ const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
 const modes = ["users", "cases", "usage", "optimize", "reading-test"];
 let readingTests;
+let refreshWorkshop;
 let mode = "users", page = 1, pages = 1, generation = 0, busy = false;
 let detailGeneration = 0;
 const number = (value) => new Intl.NumberFormat("zh-CN").format(value || 0);
@@ -114,6 +115,31 @@ function select(options, selected) {
   result.value = selected;
   return result;
 }
+function updateCategoryFilter(control, directions) {
+  if (!directions) return;
+  const previous = control.value;
+  control.replaceChildren(new Option("全部分类", ""), new Option("未分类", "uncategorized"),
+    ...Object.entries(directions).map(([key, label]) => new Option(label, key)));
+  control.value = previous;
+}
+function newCategory() {
+  return openDetail("卦例管理", "新建分类", null, () => {
+    const form = node("form"), grid = node("div", "", "grid");
+    const name = input("", 32), description = input("", 200, true);
+    name.required = true;
+    description.placeholder = "例如：询问宠物走失后的去向或找回机会";
+    grid.append(field("分类名称", name), field("适用范围（可选，供 AI 分类时参考）", description, true));
+    const actions = node("div", "", "actions"), submit = node("button", "创建分类");
+    submit.type = "submit"; actions.append(submit);
+    form.append(grid, actions);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      mutate(() => bridge.apiPost("manage/categories", { label: name.value.trim(), description: description.value.trim() }),
+        "分类已创建，可在卦例详情中选用。", () => $("detail").close());
+    });
+    $("detail-body").append(form); name.focus();
+  });
+}
 function dailyText(user) {
   if (user.daily_unlimited) return "不限";
   if (!user.daily_remaining.length) return "待用户查询";
@@ -154,6 +180,7 @@ async function load() {
   try {
     const data = await bridge.apiGet(`manage/${mode}`, {
       search: $("search").value.trim(), page, state: $("state").value,
+      ...(mode === "cases" ? { intent: $("case-category").value } : {}),
       ...(mode === "usage" ? {
         view: $("usage-view").value, start: $("usage-start").value, end: $("usage-end").value,
         group: $("usage-group").value.trim(), sender: $("usage-sender").value.trim(),
@@ -166,7 +193,10 @@ async function load() {
       for (const key of ["all", "today", "week", "month"]) $("token-" + key).textContent = tokenText(data.overview[key]);
       $("usage-selected").textContent = `所选日期范围：${tokenText(data.summary)} Token · ${tokenBreakdown(data.summary)} · ${data.summary.casts} 卦。搜索关键词仅筛选下方列表。`;
       $("usage-coverage").textContent = `开始记录：${time(data.started_at)}。上方概览按群号 / QQ 号筛选，日期范围用于下方统计。${data.storage_warning ? "部分用量保存失败，请检查 AstrBot 日志；未知调用未计入已知 Token。" : ""}`;
-    } else renderRows(data.items);
+    } else {
+      if (mode === "cases") updateCategoryFilter($("case-category"), data.directions);
+      renderRows(data.items);
+    }
     $("count").textContent = `共 ${data.total} 条记录`;
     $("page").textContent = `${page} / ${pages}`;
     $("prev").disabled = page <= 1; $("next").disabled = page >= pages;
@@ -186,12 +216,12 @@ async function load() {
 }
 function renderRows(items) {
   const headers = mode === "users" ? ["用户", "起卦 / 最近使用", "赠送余量", "状态", "累计 Token", "操作"]
-    : ["编号 / 调用时间", "所问与卦象", "用户 / 群", "反馈", "累计 Token", "操作"];
+    : ["编号 / 调用时间", "所问与卦象", "分类", "用户 / 群", "反馈", "累计 Token", "操作"];
   const head = node("tr"); headers.forEach((text) => head.append(node("th", text)));
   $("table-head").replaceChildren(head);
   $("table-body").replaceChildren();
   $("empty").hidden = items.length > 0;
-  $("empty").textContent = $("search").value ? "没有找到匹配记录，试试其他关键词。" : "暂无记录。用户成功起卦后会自动出现在这里。";
+  $("empty").textContent = mode === "cases" ? "没有符合当前筛选条件的卦例。" : $("search").value ? "没有找到匹配记录，试试其他关键词。" : "暂无记录。用户成功起卦后会自动出现在这里。";
   for (const item of items) {
     const row = node("tr");
     const cells = Array.from({ length: 6 }, () => node("td"));
@@ -217,6 +247,7 @@ function renderRows(items) {
     }
     cells[4].append(node("div", tokenText(item.token_usage, true), "primary"));
     if (item.token_usage?.tracked) cells[4].append(node("small", `${item.token_usage.calls} 次调用${item.token_usage.historical ? " · 仅后续已记录用量" : ""}`));
+    if (mode === "cases") cells.splice(2, 0, node("td", item.intent_label || "未分类"));
     row.append(...cells); $("table-body").append(row);
   }
 }
@@ -232,14 +263,15 @@ async function switchMode(next) {
   $("management-list").hidden = $("records-footnote").hidden = $("refresh").hidden = optimizing || testing;
   workshop.hidden = !optimizing;
   $("reading-test-panel").hidden = !testing;
-  if (testing && !readingTests) readingTests = mountReadingTests(bridge, time, operationId);
+  if (testing && !readingTests) readingTests = mountReadingTests(bridge, time, operationId, updateCategoryFilter);
   readingTests?.setActive(testing);
   notice("");
   if (testing) { generation++; return; }
   if (optimizing) {
     // Discard a late list response and keep the discussion mounted between tab switches.
     generation++;
-    if (!workshop.shadowRoot) mountWorkshop(workshop, bridge);
+    if (!workshop.shadowRoot) refreshWorkshop = mountWorkshop(workshop, bridge);
+    else refreshWorkshop?.();
     return;
   }
   const options = mode === "users" ? [["all", "全部用户"], ["active", "正常使用"], ["banned", "已封禁"]]
@@ -247,6 +279,7 @@ async function switchMode(next) {
   $("state").replaceChildren(...select(options, "all").children);
   $("state").value = "all";
   $("state").parentElement.hidden = mode === "usage";
+  $("category-filter").hidden = $("new-category").hidden = mode !== "cases";
   for (const id of ["usage-summary", "usage-filters", "usage-selected"]) $(id).hidden = mode !== "usage";
   $("search").placeholder = mode === "users" ? "搜索 QQ 号、昵称或群号" : "搜索编号、问题、QQ 号或备注";
   $("table-hint").textContent = mode === "users" ? "每日额度优先使用；赠送额度跨日保留，用尽后自动隐藏 +n。"
@@ -264,7 +297,7 @@ async function openDetail(kicker, title, fetcher, render) {
   $("detail-body").replaceChildren(node("p", "正在加载…")); notice("", false, true);
   if (!$("detail").open) $("detail").showModal();
   try {
-    const data = await fetcher();
+    const data = fetcher ? await fetcher() : null;
     if (current !== detailGeneration) return;
     $("detail-body").replaceChildren(); render(data);
     $("detail").scrollTop = 0;
@@ -273,7 +306,7 @@ async function openDetail(kicker, title, fetcher, render) {
 async function mutate(action, success, refresh) {
   if (busy) return;
   busy = true;
-  const controls = [...$("detail").querySelectorAll("button,input,select,textarea")];
+  const controls = [...$("detail").querySelectorAll("button,input,select,textarea")].filter((control) => !control.disabled);
   controls.forEach((control) => { control.disabled = true; });
   notice("正在保存…", false, true);
   try {
@@ -414,7 +447,7 @@ function caseChartPreview(id, serial) {
   return container;
 }
 function openCase(id) {
-  return openDetail("卦例管理", "卦例详情", () => bridge.apiGet(`manage/cases/${encodeURIComponent(id)}`), ({ case: record, revision, token_usage: usage, usage_id }) => {
+  return openDetail("卦例管理", "卦例详情", () => bridge.apiGet(`manage/cases/${encodeURIComponent(id)}`), ({ case: record, revision, directions, token_usage: usage, usage_id }) => {
     $("detail-title").textContent = `卦例 #${record.serial}`;
     const body = $("detail-body"), cast = record.cast || {}, facts = node("div", "", "facts");
     const moving = (cast.lines || []).some((value) => value === 6 || value === 9) || (cast.moving_lines || []).length > 0;
@@ -422,7 +455,19 @@ function openCase(id) {
       moving ? fact("本卦 → 之卦", `${cast.primary_name || "—"} → ${cast.changed_name || "—"}`) : fact("本卦", `${cast.primary_name || "—"} · 静卦`),
       fact("起卦用户", `${record.caster_name || ""} ${record.caster_id}`), fact("群号", record.group_id),
     );
-    body.append(facts, node("p", `调用时间：${time(record.recorded_at)} · 起卦时间：${time(record.created_at)} · ${record.method || ""} · ${record.intent_label || ""}`, "help"));
+    body.append(facts, node("p", `调用时间：${time(record.recorded_at)} · 起卦时间：${time(record.created_at)} · ${record.method || ""}`, "help"));
+    const category = section("卦例分类"), options = Object.entries(directions || {});
+    if (!options.some(([key]) => key === record.intent)) options.unshift(["", record.intent_label || "未分类"]);
+    const choice = select(options, directions?.[record.intent] ? record.intent : "");
+    const saveCategory = button("保存分类", () => mutate(() => bridge.apiPost(`manage/cases/${encodeURIComponent(id)}/update`, {
+      action: "classify", intent: choice.value, revision,
+    }), "卦例分类已保存", () => openCase(id)));
+    saveCategory.disabled = true;
+    choice.addEventListener("change", () => { saveCategory.disabled = !choice.value || choice.value === record.intent; });
+    category.append(field("所在分类", choice));
+    if (record.intent_correction) category.append(node("p", `人工修正前的分类：${record.intent_correction.original_label} · 最近修改：${time(record.intent_correction.at)}`, "help"));
+    const categoryActions = node("div", "", "actions"); categoryActions.append(saveCategory);
+    category.append(categoryActions); body.append(category);
     const tokens = section("本卦 Token 消耗");
     tokens.append(fact("累计（含复解与反馈审核）", tokenText(usage, true)));
     if (usage?.tracked) tokens.append(node("p", tokenBreakdown(usage), "help"), button("查看调用明细", () => openUsage(usage_id)));
@@ -540,6 +585,8 @@ $("detail").addEventListener("cancel", (event) => { if (busy) event.preventDefau
 $("detail").addEventListener("close", () => { detailGeneration++; });
 for (const tab of modes) $(`tab-${tab}`).addEventListener("click", () => switchMode(tab));
 $("models").addEventListener("click", openModels);
+$("new-category").addEventListener("click", newCategory);
+$("case-category").addEventListener("change", () => { page = 1; notice(""); load(); });
 $("export-cases").addEventListener("click", exportCases);
 $("usage-view").addEventListener("change", () => { page = 1; $("search").value = ""; usageSearchPlaceholder(); notice(""); load(); });
 $("usage-reset").addEventListener("click", () => {

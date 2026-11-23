@@ -22,9 +22,8 @@ def render_bundle() -> str:
         "export function mountWorkshop(host, bridge) {\n"
         '  const root = host.attachShadow({ mode: "open" });\n'
         f"  root.innerHTML = `{literal}`;\n"
-        "  startWorkshop(root, bridge);\n"
-        "}\n\n"
-        + controller
+        "  return startWorkshop(root, bridge);\n"
+        "}\n\n" + controller
     )
 
 
