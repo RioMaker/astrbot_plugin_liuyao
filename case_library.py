@@ -23,8 +23,9 @@ def feedback_with_text(case: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def feedback_closed(case: dict[str, Any]) -> bool:
-    return any(
-        isinstance(row, dict) and row.get("valid") is not False for row in case.get("feedback", [])
+    rows = case.get("feedback")
+    return isinstance(rows, list) and any(
+        isinstance(row, dict) and row.get("valid") is not False for row in rows
     )
 
 

@@ -41,14 +41,14 @@ def export_endpoint(monkeypatch):
     return plugin, web.request, handler
 
 
-async def read_export(handler):
+async def read_export(handler, filename_prefix="liuyao_cases"):
     response = await handler()
     content = b"".join([chunk async for chunk in response.content])
     assert response.content_type == "application/zip"
     assert response.headers["Cache-Control"] == "no-store"
     assert int(response.headers["Content-Length"]) == len(content)
     assert re.fullmatch(
-        r'attachment; filename="liuyao_cases_\d{8}_\d{6}\.zip"',
+        rf'attachment; filename="{filename_prefix}_\d{{8}}_\d{{6}}\.zip"',
         response.headers["Content-Disposition"],
     )
     with ZipFile(BytesIO(content)) as archive:
@@ -115,6 +115,54 @@ def test_export_is_complete_lossless_read_only_and_ignores_filters(export_endpoi
     assert "自下而上" in guide and "get_kv_data" in guide and "5000" in guide
 
 
+@pytest.mark.parametrize("legacy_list", [False, True], ids=["library", "legacy-list"])
+def test_feedback_export_preserves_closed_cases_and_metadata(export_endpoint, legacy_list):
+    plugin, request, handler = export_endpoint
+    reviewed = {
+        "id": "reviewed",
+        "serial": 42,
+        "feedback": [{"valid": False}, {"valid": True, "text": "提前完工"}],
+        "future_field": {"keep": True},
+    }
+    legacy = {"id": "legacy", "feedback": [{"text": "没有应验"}]}
+    cases = [
+        reviewed,
+        {"id": "rejected", "status": "feedback_recorded", "feedback": [{"valid": False}]},
+        {"id": "retry", "feedback_review": {"last_decision": {"action": "retry"}}},
+        {"id": "pending", "analysis": "原断", "feedback": []},
+        legacy,
+        {"id": "malformed", "feedback": None},
+        "historical",
+    ]
+    metadata = {"next_serial": 87, "user_scores": {"bob": 6}, "future_metadata": [1]}
+    payload = cases if legacy_list else {**metadata, "cases": cases}
+    original = copy.deepcopy(payload)
+    plugin.get_kv_data.return_value = payload
+    request.query = {"scope": "feedback", "state": "pending", "page": "2", "search": "无匹配"}
+
+    exported, _guide = asyncio.run(read_export(handler, "liuyao_cases_feedback"))
+
+    expected = [reviewed, legacy]
+    assert exported == (expected if legacy_list else {**metadata, "cases": expected})
+    assert payload == original
+    plugin.put_kv_data.assert_not_awaited()
+
+
+def test_feedback_export_with_no_matches_returns_an_empty_case_list(export_endpoint):
+    plugin, request, handler = export_endpoint
+    plugin.get_kv_data.return_value = {"cases": [{"id": "chart-only"}], "next_serial": 5}
+    request.query = {"scope": "feedback"}
+    exported, _guide = asyncio.run(read_export(handler, "liuyao_cases_feedback"))
+    assert exported == {"cases": [], "next_serial": 5}
+
+
+def test_unknown_export_scope_is_rejected_before_reading_the_library(export_endpoint):
+    plugin, request, handler = export_endpoint
+    request.query = {"scope": "mistyped"}
+    assert asyncio.run(handler())[1] == 400
+    plugin.get_kv_data.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -162,10 +210,10 @@ def test_export_snapshot_is_detached_and_releases_writer_lock(export_endpoint, m
     plugin.get_kv_data.return_value = payload
     original = copy.deepcopy(payload)
 
-    def pack(snapshot):
+    def pack(snapshot, *, feedback_only):
         assert not plugin._case_lock_instance().locked()
         payload["cases"][0]["feedback"][0]["text"] = "稍后的修改"
-        return build_case_export(snapshot)
+        return build_case_export(snapshot, feedback_only=feedback_only)
 
     async def get_data(key, default):
         assert plugin._case_lock_instance().locked()

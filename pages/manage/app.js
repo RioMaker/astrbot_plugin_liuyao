@@ -3,6 +3,7 @@ import { mountReadingTests } from "./reading-test.js";
 
 const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+const exportButtons = document.querySelectorAll("[data-export-scope]");
 const modes = ["users", "cases", "usage", "optimize", "reading-test"];
 let readingTests;
 let refreshWorkshop;
@@ -49,23 +50,26 @@ function notice(message, error = false, detail = false) {
   box.classList.toggle("error", error);
   box.hidden = !message;
 }
-async function exportCases() {
-  const control = $("export-cases");
+async function exportCases(event) {
+  const control = event.currentTarget;
   if (control.disabled) return;
-  control.disabled = true;
+  const feedbackOnly = control.dataset.exportScope === "feedback";
+  const scopeLabel = feedbackOnly ? "已反馈卦例" : "全部卦例";
+  const originalLabel = control.textContent;
+  for (const button of exportButtons) button.disabled = true;
   control.textContent = "正在导出…";
-  notice("正在打包全部已保存卦例及说明文件…");
+  notice(`正在打包${scopeLabel}及说明文件…`);
   try {
     if (typeof bridge?.download !== "function") {
       throw new Error("当前 AstrBot 不支持页面下载，请升级 AstrBot 后重试。");
     }
-    await bridge.download("manage/export/cases", {});
-    notice("已发起全部卦例下载：ZIP 内含 liuyao_case_library.json 和 README.md，请查看浏览器下载记录。");
+    await bridge.download("manage/export/cases", feedbackOnly ? { scope: "feedback" } : {});
+    notice(`已发起${scopeLabel}下载，请查看浏览器下载记录。`);
   } catch (error) {
     notice(`卦例导出失败：${error.message || "请稍后重试"}`, true);
   } finally {
-    control.disabled = false;
-    control.textContent = "导出全部卦例";
+    control.textContent = originalLabel;
+    for (const button of exportButtons) button.disabled = false;
   }
 }
 function button(text, callback, cls = "secondary") {
@@ -587,7 +591,7 @@ for (const tab of modes) $(`tab-${tab}`).addEventListener("click", () => switchM
 $("models").addEventListener("click", openModels);
 $("new-category").addEventListener("click", newCategory);
 $("case-category").addEventListener("change", () => { page = 1; notice(""); load(); });
-$("export-cases").addEventListener("click", exportCases);
+for (const control of exportButtons) control.addEventListener("click", exportCases);
 $("usage-view").addEventListener("change", () => { page = 1; $("search").value = ""; usageSearchPlaceholder(); notice(""); load(); });
 $("usage-reset").addEventListener("click", () => {
   for (const key of ["start", "end", "group", "sender"]) $("usage-" + key).value = "";
@@ -601,7 +605,7 @@ $("next").addEventListener("click", () => { if (page < pages) { page++; load(); 
 try {
   if (!bridge) throw new Error("请从 AstrBot WebUI 侧栏打开「六爻起卦」。");
   await bridge.ready();
-  $("export-cases").disabled = false;
+  for (const control of exportButtons) control.disabled = false;
   await load();
   const data = await bridge.apiGet("manage/cases", { page: 1 });
   $("stat-cases").textContent = data.all_count;

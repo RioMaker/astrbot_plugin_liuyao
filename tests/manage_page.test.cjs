@@ -292,7 +292,7 @@ test("rapid repeated submission sends only one request; a later grant has a new 
 });
 
 for (const protocol of ["http", "https"]) {
-  test(`${protocol.toUpperCase()} sandbox: export downloads all cases independently of filters`, async (t) => {
+  test(`${protocol.toUpperCase()} sandbox: both export scopes are independent of list filters`, async (t) => {
     const { frame, errors } = await openPage(t, protocol);
     await frame.getByRole("button", { name: "关闭详情" }).click();
     await frame.getByRole("button", { name: "卦例管理", exact: true }).click();
@@ -300,7 +300,12 @@ for (const protocol of ["http", "https"]) {
     await frame.locator("#state").selectOption("pending");
     await frame.getByRole("button", { name: "导出全部卦例", exact: true }).click();
     await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("已发起全部卦例下载"));
-    assert.deepEqual(await frame.evaluate(() => qa.downloads), [{ endpoint: "manage/export/cases", params: {} }]);
+    await frame.getByRole("button", { name: "仅导出已反馈卦例", exact: true }).click();
+    await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("已发起已反馈卦例下载"));
+    assert.deepEqual(await frame.evaluate(() => qa.downloads), [
+      { endpoint: "manage/export/cases", params: {} },
+      { endpoint: "manage/export/cases", params: { scope: "feedback" } },
+    ]);
     assert.equal(await frame.locator("#export-cases").isEnabled(), true);
     assert.deepEqual(errors, []);
   });
@@ -309,22 +314,25 @@ for (const protocol of ["http", "https"]) {
 test("export prevents duplicate downloads and permits retry after an error", async (t) => {
   const { frame, errors } = await openPage(t);
   await frame.getByRole("button", { name: "关闭详情" }).click();
+  const feedbackExport = frame.locator('[data-export-scope="feedback"]');
   await frame.evaluate(() => {
     qa.blockDownload = true;
     qa.downloadError = "模拟下载失败";
-    const control = document.getElementById("export-cases");
-    control.dispatchEvent(new Event("click"));
-    control.dispatchEvent(new Event("click"));
+    document.querySelector('[data-export-scope="feedback"]').dispatchEvent(new Event("click"));
+    document.getElementById("export-cases").dispatchEvent(new Event("click"));
   });
   assert.equal(await frame.locator("#export-cases").isEnabled(), false);
+  assert.equal(await feedbackExport.isEnabled(), false);
   assert.equal(await frame.evaluate(() => qa.downloads.length), 1);
   await frame.evaluate(() => { qa.blockDownload = false; qa.resumeDownload(); });
   await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("模拟下载失败"));
   assert.equal(await frame.locator("#export-cases").isEnabled(), true);
   await frame.evaluate(() => { qa.downloadError = ""; });
-  await frame.locator("#export-cases").click();
-  await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("已发起全部卦例下载"));
-  assert.equal(await frame.evaluate(() => qa.downloads.length), 2);
+  await feedbackExport.click();
+  await frame.waitForFunction(() => document.getElementById("notice").textContent.includes("已发起已反馈卦例下载"));
+  assert.deepEqual(await frame.evaluate(() => qa.downloads.map((d) => d.params)), [
+    { scope: "feedback" }, { scope: "feedback" },
+  ]);
   assert.deepEqual(errors, []);
 });
 

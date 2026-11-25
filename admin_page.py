@@ -115,7 +115,7 @@ class AdminPageMixin:
             "/astrbot_plugin_liuyao/manage/export/cases",
             handler_for(self._page_export_cases, raw_response=True),
             ["GET"],
-            "导出全部六爻卦例及存储说明",
+            "导出全部或已反馈的六爻卦例及存储说明",
         )
 
         for path, callback, post in (
@@ -137,13 +137,18 @@ class AdminPageMixin:
     async def _page_export_cases(self, *, query):
         from astrbot.api.web import stream_response
 
-        # Export the stored value itself, including legacy and unknown fields.
-        # Detach it under the writer lock, then release the lock before compression.
+        scope = query.get("scope", "all")
+        if scope not in {"all", "feedback"}:
+            raise ManagementError("未知的卦例导出范围")
+        feedback_only = scope == "feedback"
+
+        # Detach the raw store under the writer lock before selection and compression.
         async with self._case_lock_instance():
             snapshot = copy.deepcopy(await self.get_kv_data(CASES_KEY, serialize_case_store([])))
             exported_at = datetime.now(BEIJING)
-        archive = await asyncio.to_thread(build_case_export, snapshot)
-        filename = f"liuyao_cases_{exported_at.strftime('%Y%m%d_%H%M%S')}.zip"
+        archive = await asyncio.to_thread(build_case_export, snapshot, feedback_only=feedback_only)
+        prefix = "liuyao_cases_feedback" if feedback_only else "liuyao_cases"
+        filename = f"{prefix}_{exported_at:%Y%m%d_%H%M%S}.zip"
 
         async def chunks():
             for offset in range(0, len(archive), 64 * 1024):
